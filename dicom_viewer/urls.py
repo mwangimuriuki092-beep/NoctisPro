@@ -21,6 +21,8 @@ urlpatterns = [
     # Real-time features
     path('api/realtime/studies/', views.api_realtime_studies, name='api_realtime_studies'),
     path('api/study/<int:study_id>/progress/', views.api_study_progress, name='api_study_progress'),
+    path('api/series/<int:series_id>/slices/', views.api_series_slices, name='api_series_slices'),
+    path('api/series/<int:series_id>/images/', views.api_series_images_chunk, name='api_series_images_chunk'),
     
     # Measurements and annotations
     path('api/study/<int:study_id>/measurements/', views.api_measurements, name='api_measurements'),

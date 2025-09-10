@@ -143,3 +143,13 @@ Watching for file changes with StatReloader
 Watching for file changes with StatReloader
 /workspace/dicom_viewer/views.py changed, reloading.
 Watching for file changes with StatReloader
+/workspace/dicom_viewer/urls.py changed, reloading.
+Watching for file changes with StatReloader
+/workspace/dicom_viewer/views.py changed, reloading.
+Watching for file changes with StatReloader
+/workspace/dicom_viewer/views.py changed, reloading.
+Watching for file changes with StatReloader
+Not Found: /viewer/api/series/1/slices/
+Not Found: /viewer/api/series/1/images/
+Forbidden: /reports/export/pdf/1/
+Forbidden: /reports/export/docx/1/

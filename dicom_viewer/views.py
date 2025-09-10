@@ -559,6 +559,42 @@ def api_reconstruction(request, study_id):
     
     return JsonResponse({'error': 'Method not allowed'}, status=405)
 
+
+@login_required
+def api_series_slices(request, series_id):
+    """Return lightweight slice metadata for a series to allow prefetching in viewer."""
+    series = get_object_or_404(Series, id=series_id)
+    user = request.user
+    if user.is_facility_user() and series.study.facility != user.facility:
+        return JsonResponse({'error': 'Permission denied'}, status=403)
+    images = series.images.all().order_by('instance_number').values('id', 'instance_number', 'file_path', 'slice_location')
+    return JsonResponse({'series_id': series_id, 'count': images.count(), 'images': list(images)})
+
+
+@login_required
+def api_series_images_chunk(request, series_id):
+    """Paginated images for a series. Query params: offset, limit."""
+    try:
+        offset = int(request.GET.get('offset', '0') or '0')
+        limit = min(int(request.GET.get('limit', '50') or '50'), 200)
+    except Exception:
+        offset, limit = 0, 50
+    series = get_object_or_404(Series, id=series_id)
+    user = request.user
+    if user.is_facility_user() and series.study.facility != user.facility:
+        return JsonResponse({'error': 'Permission denied'}, status=403)
+    qs = series.images.all().order_by('instance_number')
+    total = qs.count()
+    chunk = qs[offset:offset+limit]
+    data = [
+        {
+            'id': img.id,
+            'instance_number': img.instance_number,
+            'file_path': img.file_path.url if img.file_path else ''
+        } for img in chunk
+    ]
+    return JsonResponse({'series_id': series_id, 'total': total, 'offset': offset, 'limit': limit, 'images': data})
+
 @login_required
 @csrf_exempt
 def api_hounsfield_units(request):
@@ -960,6 +996,9 @@ def print_dicom_image(request):
         copies = int(request.POST.get('copies', request.session.get('print_settings', {}).get('copies', 1)))
 
         img_obj = get_object_or_404(DicomImage, id=image_id)
+        # Facility permissions
+        if request.user.is_facility_user() and img_obj.series.study.facility != request.user.facility:
+            return JsonResponse({'success': False, 'error': 'Permission denied'}, status=403)
         dicom_path = os.path.join(settings.MEDIA_ROOT, str(img_obj.file_path))
         ds = pydicom.dcmread(dicom_path)
         pil_img = _dicom_to_pil(ds)
