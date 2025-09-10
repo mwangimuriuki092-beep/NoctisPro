@@ -22,6 +22,7 @@ import subprocess
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import A4, letter
 from reportlab.lib.utils import ImageReader
+import zipfile
 
 @login_required
 def viewer(request):
@@ -1028,5 +1029,101 @@ def print_dicom_image(request):
         # Do NOT print on server. Return a browser-printable PDF for the user.
         download_url = f"{settings.MEDIA_URL.rstrip('/')}/exports/{pdf_name}"
         return JsonResponse({'success': True, 'download_url': download_url, 'filename': pdf_name})
+    except Exception as e:
+        return JsonResponse({'success': False, 'error': str(e)}, status=500)
+
+
+@login_required
+@csrf_exempt
+def print_image_package(request):
+    """Create a multi-page PDF from multiple images or a whole series.
+    POST accepts either image_ids[] or series_id; returns a downloadable PDF for client-side printing.
+    """
+    try:
+        ids = request.POST.getlist('image_ids[]') or request.POST.getlist('image_ids')
+        series_id = request.POST.get('series_id')
+        images = []
+        if ids:
+            images = list(DicomImage.objects.filter(id__in=ids).select_related('series__study').order_by('instance_number'))
+        elif series_id:
+            series = get_object_or_404(Series, id=series_id)
+            if request.user.is_facility_user() and series.study.facility != request.user.facility:
+                return JsonResponse({'success': False, 'error': 'Permission denied'}, status=403)
+            images = list(series.images.all().order_by('instance_number'))
+        else:
+            return JsonResponse({'success': False, 'error': 'Provide image_ids[] or series_id'}, status=400)
+
+        if not images:
+            return JsonResponse({'success': False, 'error': 'No images found'}, status=404)
+
+        exports_dir = os.path.join(settings.MEDIA_ROOT, 'exports')
+        os.makedirs(exports_dir, exist_ok=True)
+        pdf_name = f'{uuid.uuid4().hex}_package.pdf'
+        pdf_path = os.path.join(exports_dir, pdf_name)
+
+        pagesize = A4
+        c = canvas.Canvas(pdf_path, pagesize=pagesize)
+        width, height = pagesize
+        margin = 36
+        for img in images:
+            dicom_path = os.path.join(settings.MEDIA_ROOT, str(img.file_path))
+            ds = pydicom.dcmread(dicom_path)
+            pil_img = _dicom_to_pil(ds)
+            img_reader = ImageReader(pil_img)
+            iw, ih = pil_img.size
+            scale = min((width - 2*margin) / iw, (height - 2*margin) / ih)
+            dw, dh = iw * scale, ih * scale
+            x = (width - dw) / 2
+            y = (height - dh) / 2
+            c.drawImage(img_reader, x, y, dw, dh, preserveAspectRatio=True, mask='auto')
+            c.showPage()
+        c.save()
+        download_url = f"{settings.MEDIA_URL.rstrip('/')}/exports/{pdf_name}"
+        return JsonResponse({'success': True, 'download_url': download_url, 'filename': pdf_name})
+    except Exception as e:
+        return JsonResponse({'success': False, 'error': str(e)}, status=500)
+
+
+@login_required
+@csrf_exempt
+def export_images_zip(request):
+    """Export selected images or a series as a ZIP of PNGs for editing in Word or other tools.
+    POST accepts image_ids[] or series_id. Returns a downloadable ZIP path.
+    """
+    try:
+        ids = request.POST.getlist('image_ids[]') or request.POST.getlist('image_ids')
+        series_id = request.POST.get('series_id')
+        images = []
+        if ids:
+            images = list(DicomImage.objects.filter(id__in=ids).select_related('series__study').order_by('instance_number'))
+        elif series_id:
+            series = get_object_or_404(Series, id=series_id)
+            if request.user.is_facility_user() and series.study.facility != request.user.facility:
+                return JsonResponse({'success': False, 'error': 'Permission denied'}, status=403)
+            images = list(series.images.all().order_by('instance_number'))
+        else:
+            return JsonResponse({'success': False, 'error': 'Provide image_ids[] or series_id'}, status=400)
+
+        if not images:
+            return JsonResponse({'success': False, 'error': 'No images found'}, status=404)
+
+        exports_dir = os.path.join(settings.MEDIA_ROOT, 'exports')
+        os.makedirs(exports_dir, exist_ok=True)
+        zip_name = f'{uuid.uuid4().hex}_images.zip'
+        zip_path = os.path.join(exports_dir, zip_name)
+        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
+            for img in images:
+                dicom_path = os.path.join(settings.MEDIA_ROOT, str(img.file_path))
+                ds = pydicom.dcmread(dicom_path)
+                pil_img = _dicom_to_pil(ds)
+                buf_path = os.path.join(exports_dir, f'{uuid.uuid4().hex}.png')
+                pil_img.save(buf_path, format='PNG')
+                zf.write(buf_path, arcname=os.path.basename(buf_path))
+                try:
+                    os.remove(buf_path)
+                except Exception:
+                    pass
+        download_url = f"{settings.MEDIA_URL.rstrip('/')}/exports/{zip_name}"
+        return JsonResponse({'success': True, 'download_url': download_url, 'filename': zip_name})
     except Exception as e:
         return JsonResponse({'success': False, 'error': str(e)}, status=500)

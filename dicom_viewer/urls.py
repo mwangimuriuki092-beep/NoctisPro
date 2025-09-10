@@ -37,4 +37,6 @@ urlpatterns = [
     path('print/settings/', views.print_settings_view, name='print_settings'),
     path('print/printers/', views.get_available_printers, name='get_available_printers'),
     path('print/image/', views.print_dicom_image, name='print_dicom_image'),
+    path('print/package/', views.print_image_package, name='print_image_package'),
+    path('export/images/', views.export_images_zip, name='export_images_zip'),
 ]

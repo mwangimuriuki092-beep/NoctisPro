@@ -155,3 +155,7 @@ Forbidden: /reports/export/pdf/1/
 Forbidden: /reports/export/docx/1/
 /workspace/dicom_viewer/views.py changed, reloading.
 Watching for file changes with StatReloader
+/workspace/dicom_viewer/urls.py changed, reloading.
+Watching for file changes with StatReloader
+/workspace/dicom_viewer/views.py changed, reloading.
+Watching for file changes with StatReloader
