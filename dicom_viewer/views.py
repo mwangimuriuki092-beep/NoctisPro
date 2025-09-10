@@ -760,18 +760,71 @@ def upload_dicom(request):
             # Generate upload ID for tracking
             upload_id = str(uuid.uuid4())
             
-            # This would process DICOM files and create Study/Series/Image records
-            # For now, we'll simulate processing
             total_files = len(uploaded_files)
             processed_files = 0
-            
+
+            media_base = settings.MEDIA_ROOT
+            save_base = os.path.join(media_base, 'dicom', 'uploads')
+            os.makedirs(save_base, exist_ok=True)
+
             for file in uploaded_files:
-                # Validate file type
                 if not (file.name.lower().endswith('.dcm') or file.name.lower().endswith('.dicom')):
                     continue
-                
-                # This would save the file and create Study/Series/Image records
-                processed_files += 1
+                tmp_path = os.path.join(save_base, f"{uuid.uuid4().hex}_{file.name}")
+                with open(tmp_path, 'wb') as out:
+                    for chunk in file.chunks():
+                        out.write(chunk)
+                try:
+                    ds = pydicom.dcmread(tmp_path, stop_before_pixels=False)
+                    from worklist.models import Patient, Study, Series, DicomImage, Modality
+                    pid = str(getattr(ds, 'PatientID', uuid.uuid4().hex))
+                    pname = str(getattr(ds, 'PatientName', 'Unknown'))
+                    parts = pname.split('^') if pname else ['Unknown','Patient']
+                    first = parts[0] or 'Unknown'; last = (parts[1] if len(parts) > 1 else 'Patient')
+                    try:
+                        dob = str(getattr(ds, 'PatientBirthDate', '19700101'))
+                        dob_fmt = f"{dob[0:4]}-{dob[4:6]}-{dob[6:8]}" if len(dob) == 8 else '1970-01-01'
+                    except Exception:
+                        dob_fmt = '1970-01-01'
+                    gender = (str(getattr(ds, 'PatientSex','O')) or 'O')[0]
+                    patient, _ = Patient.objects.get_or_create(patient_id=pid, defaults={'first_name': first, 'last_name': last, 'date_of_birth': dob_fmt, 'gender': gender})
+                    mod_code = str(getattr(ds, 'Modality', 'CT'))
+                    modality, _ = Modality.objects.get_or_create(code=mod_code, defaults={'name': mod_code})
+                    suid = str(getattr(ds, 'StudyInstanceUID', uuid.uuid4().hex))
+                    acc = str(getattr(ds, 'AccessionNumber', uuid.uuid4().hex[:8]))
+                    from accounts.models import Facility
+                    facility = Facility.objects.first() or Facility.objects.create(name='Default Facility', address='-', phone='-', email='test@example.com', license_number='DEF-001')
+                    study, _ = Study.objects.get_or_create(
+                        study_instance_uid=suid,
+                        defaults={
+                            'accession_number': acc,
+                            'patient': patient,
+                            'facility': facility,
+                            'modality': modality,
+                            'study_description': str(getattr(ds, 'StudyDescription', '')),
+                            'study_date': timezone.now(),
+                            'referring_physician': str(getattr(ds, 'ReferringPhysicianName','')) or 'N/A',
+                        }
+                    )
+                    ser_uid = str(getattr(ds, 'SeriesInstanceUID', uuid.uuid4().hex))
+                    ser_no = int(getattr(ds, 'SeriesNumber', 1) or 1)
+                    series, _ = Series.objects.get_or_create(series_instance_uid=ser_uid, defaults={'study': study, 'series_number': ser_no, 'modality': mod_code, 'series_description': str(getattr(ds, 'SeriesDescription',''))})
+                    rel_path = os.path.relpath(tmp_path, media_base)
+                    sop_uid = str(getattr(ds, 'SOPInstanceUID', uuid.uuid4().hex))
+                    inst_no = int(getattr(ds, 'InstanceNumber', 1) or 1)
+                    size = os.path.getsize(tmp_path)
+                    DicomImage.objects.create(sop_instance_uid=sop_uid, series=series, instance_number=inst_no, file_path=rel_path, file_size=size, processed=False)
+                    try:
+                        pil = _dicom_to_pil(ds)
+                        thumb_dir = os.path.join(media_base, 'dicom', 'thumbnails')
+                        os.makedirs(thumb_dir, exist_ok=True)
+                        thumb_path = os.path.join(thumb_dir, f"{sop_uid}.png")
+                        pil.thumbnail((256, 256)); pil.save(thumb_path, format='PNG')
+                    except Exception:
+                        pass
+                    processed_files += 1
+                except Exception:
+                    continue
             
             if processed_files == 0:
                 return JsonResponse({'success': False, 'error': 'No valid DICOM files found'})
