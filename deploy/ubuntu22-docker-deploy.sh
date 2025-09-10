@@ -3,8 +3,8 @@ set -euo pipefail
 
 # Usage:
 #   sudo bash deploy/ubuntu22-docker-deploy.sh \
-#     --domain your-domain.com \
-#     --email admin@your-domain.com \
+#     [--domain your-domain.com] \
+#     [--email admin@your-domain.com] \
 #     --project-dir /opt/noctis_pro \
 #     [--compose-file docker-compose.yml]
 
@@ -28,10 +28,8 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ -z "$DOMAIN" || -z "$ACME_EMAIL" ]]; then
-  echo "ERROR: --domain and --email are required"
-  exit 1
-fi
+echo "==> Domain provided: ${DOMAIN:-<none>}"
+echo "==> ACME email provided: ${ACME_EMAIL:-<none>}"
 
 echo "==> Updating apt and installing prerequisites"
 apt-get update -y
@@ -72,23 +70,43 @@ if [[ ! -f .env ]]; then
 fi
 
 echo "==> Writing environment values"
-sed -i "s/^DOMAIN=.*/DOMAIN=${DOMAIN}/" .env || echo "DOMAIN=${DOMAIN}" >> .env
-sed -i "s/^ACME_EMAIL=.*/ACME_EMAIL=${ACME_EMAIL}/" .env || echo "ACME_EMAIL=${ACME_EMAIL}" >> .env
-sed -i "s/^ALLOWED_HOSTS=.*/ALLOWED_HOSTS=${DOMAIN},localhost,127.0.0.1/" .env || echo "ALLOWED_HOSTS=${DOMAIN},localhost,127.0.0.1" >> .env
-sed -i "s/^CSRF_TRUSTED_ORIGINS=.*/CSRF_TRUSTED_ORIGINS=https:\/\/${DOMAIN},http:\/\/localhost:8000,http:\/\/127.0.0.1:8000/" .env || true
-sed -i "s/^CORS_ALLOWED_ORIGINS=.*/CORS_ALLOWED_ORIGINS=https:\/\/${DOMAIN},http:\/\/localhost:3000,http:\/\/127.0.0.1:3000/" .env || true
-sed -i "s/^SECURE_SSL_REDIRECT=.*/SECURE_SSL_REDIRECT=True/" .env || echo "SECURE_SSL_REDIRECT=True" >> .env
-
-echo "==> Verifying DNS resolves to this host"
-HOST_IP=$(curl -fsS ifconfig.me || curl -fsS https://ipinfo.io/ip || echo "")
-if [[ -n "$HOST_IP" ]]; then
-  DOMAIN_IP=$(getent hosts "$DOMAIN" | awk '{print $1}' | head -n1 || true)
-  if [[ -n "$DOMAIN_IP" && "$DOMAIN_IP" != "$HOST_IP" ]]; then
-    echo "WARNING: ${DOMAIN} resolves to ${DOMAIN_IP}, but this host public IP is ${HOST_IP}. Let's Encrypt may fail."
+if [[ -n "$DOMAIN" ]]; then
+  sed -i "s/^DOMAIN=.*/DOMAIN=${DOMAIN}/" .env || echo "DOMAIN=${DOMAIN}" >> .env
+  if [[ -n "$ACME_EMAIL" ]]; then
+    sed -i "s/^ACME_EMAIL=.*/ACME_EMAIL=${ACME_EMAIL}/" .env || echo "ACME_EMAIL=${ACME_EMAIL}" >> .env
   fi
+  sed -i "s/^ALLOWED_HOSTS=.*/ALLOWED_HOSTS=${DOMAIN},localhost,127.0.0.1/" .env || echo "ALLOWED_HOSTS=${DOMAIN},localhost,127.0.0.1" >> .env
+  sed -i "s/^CSRF_TRUSTED_ORIGINS=.*/CSRF_TRUSTED_ORIGINS=https:\/\/${DOMAIN},http:\/\/localhost:8000,http:\/\/127.0.0.1:8000/" .env || true
+  sed -i "s/^CORS_ALLOWED_ORIGINS=.*/CORS_ALLOWED_ORIGINS=https:\/\/${DOMAIN},http:\/\/localhost:3000,http:\/\/127.0.0.1:3000/" .env || true
+  sed -i "s/^SECURE_SSL_REDIRECT=.*/SECURE_SSL_REDIRECT=True/" .env || echo "SECURE_SSL_REDIRECT=True" >> .env
 else
-  echo "WARNING: Could not determine public IP. Skipping DNS check."
+  sed -i "s/^DOMAIN=.*/DOMAIN=/" .env || echo "DOMAIN=" >> .env
+  sed -i "s/^ALLOWED_HOSTS=.*/ALLOWED_HOSTS=localhost,127.0.0.1/" .env || echo "ALLOWED_HOSTS=localhost,127.0.0.1" >> .env
+  sed -i "s/^CSRF_TRUSTED_ORIGINS=.*/CSRF_TRUSTED_ORIGINS=http:\/\/localhost:8000,http:\/\/127.0.0.1:8000/" .env || true
+  sed -i "s/^CORS_ALLOWED_ORIGINS=.*/CORS_ALLOWED_ORIGINS=http:\/\/localhost:3000,http:\/\/127.0.0.1:3000/" .env || true
+  sed -i "s/^SECURE_SSL_REDIRECT=.*/SECURE_SSL_REDIRECT=False/" .env || echo "SECURE_SSL_REDIRECT=False" >> .env
 fi
+
+DNS_OK="0"
+if [[ -n "$DOMAIN" ]]; then
+  echo "==> Verifying DNS resolves to this host"
+  HOST_IP=$(curl -fsS ifconfig.me || curl -fsS https://ipinfo.io/ip || echo "")
+  if [[ -n "$HOST_IP" ]]; then
+    DOMAIN_IP=$(getent hosts "$DOMAIN" | awk '{print $1}' | head -n1 || true)
+    if [[ -n "$DOMAIN_IP" && "$DOMAIN_IP" == "$HOST_IP" ]]; then
+      DNS_OK="1"
+      echo "DNS check OK: ${DOMAIN} -> ${DOMAIN_IP}"
+    else
+      echo "WARNING: ${DOMAIN} resolves to ${DOMAIN_IP:-<none>}, host IP is ${HOST_IP}. Falling back to HTTP-only."
+    fi
+  else
+    echo "WARNING: Could not determine public IP. Falling back to HTTP-only."
+  fi
+fi
+
+echo "==> Ensuring static and media directories exist"
+mkdir -p static staticfiles media
+sed -i "s/^COLLECTSTATIC=.*/COLLECTSTATIC=1/" .env || echo "COLLECTSTATIC=1" >> .env
 
 echo "==> Pulling/building containers"
 docker compose -f "$COMPOSE_FILE" pull || true
@@ -101,11 +119,25 @@ echo "==> Running database migrations"
 docker compose -f "$COMPOSE_FILE" exec -T web python manage.py migrate --noinput
 
 echo "==> Health check"
-sleep 3
+sleep 5
 set +e
-curl -fsS http://localhost:8000/ >/dev/null && echo "HTTP OK" || echo "HTTP check failed"
-curl -IkfsS https://$DOMAIN/ >/dev/null && echo "HTTPS OK" || echo "HTTPS check failed (may need DNS/propagation)"
+echo "Smoke test: /, /login/, /worklist/, /viewer/"
+for path in "/" "/login/" "/worklist/" "/viewer/"; do
+  code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000${path})
+  echo "HTTP ${path} -> ${code}"
+done
+
+if [[ "$DNS_OK" == "1" ]]; then
+  code_root=$(curl -sk -o /dev/null -w "%{http_code}" https://${DOMAIN}/)
+  echo "HTTPS / -> ${code_root}"
+else
+  echo "Skipping HTTPS smoke test (DNS not OK or no domain)."
+fi
 set -e
 
-echo "==> Done. Visit: https://${DOMAIN}"
+if [[ "$DNS_OK" == "1" ]]; then
+  echo "==> Done. Visit: https://${DOMAIN}"
+else
+  echo "==> Done. Visit: http://<server-ip>:8000 (no domain detected)"
+fi
 
