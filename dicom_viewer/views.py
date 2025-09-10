@@ -1003,10 +1003,11 @@ def print_dicom_image(request):
         ds = pydicom.dcmread(dicom_path)
         pil_img = _dicom_to_pil(ds)
 
-        tmp_dir = os.path.join(settings.MEDIA_ROOT, 'print_tmp')
-        os.makedirs(tmp_dir, exist_ok=True)
-        png_path = os.path.join(tmp_dir, f'{uuid.uuid4().hex}.png')
-        pdf_path = os.path.join(tmp_dir, f'{uuid.uuid4().hex}.pdf')
+        exports_dir = os.path.join(settings.MEDIA_ROOT, 'exports')
+        os.makedirs(exports_dir, exist_ok=True)
+        png_path = os.path.join(exports_dir, f'{uuid.uuid4().hex}.png')
+        pdf_name = f'{uuid.uuid4().hex}.pdf'
+        pdf_path = os.path.join(exports_dir, pdf_name)
         _save_png(pil_img, png_path)
 
         # Build PDF
@@ -1024,21 +1025,8 @@ def print_dicom_image(request):
         c.drawImage(img_reader, x, y, dw, dh, preserveAspectRatio=True, mask='auto')
         c.showPage(); c.save()
 
-        # Try printing with lp
-        try:
-            cmd = ['lp']
-            if printer_name:
-                cmd += ['-d', printer_name]
-            if copies and copies > 1:
-                cmd += ['-n', str(copies)]
-            cmd += [pdf_path]
-            subprocess.check_output(cmd, stderr=subprocess.STDOUT, timeout=5)
-            printed = True
-            message = 'Print job submitted'
-        except Exception as e:
-            printed = False
-            message = f'Print submission failed: {str(e)}'
-
-        return JsonResponse({'success': True, 'printed': printed, 'message': message})
+        # Do NOT print on server. Return a browser-printable PDF for the user.
+        download_url = f"{settings.MEDIA_URL.rstrip('/')}/exports/{pdf_name}"
+        return JsonResponse({'success': True, 'download_url': download_url, 'filename': pdf_name})
     except Exception as e:
         return JsonResponse({'success': False, 'error': str(e)}, status=500)
