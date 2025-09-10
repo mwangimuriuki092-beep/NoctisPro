@@ -15,7 +15,14 @@ from io import BytesIO
 import cv2
 from PIL import Image
 from django.utils import timezone
+from django.conf import settings
+from django.views.decorators.csrf import csrf_exempt
 import uuid
+import subprocess
+from reportlab.pdfgen import canvas
+from reportlab.lib.pagesizes import A4, letter
+from reportlab.lib.utils import ImageReader
+import zipfile
 
 @login_required
 def viewer(request):
@@ -197,7 +204,7 @@ def api_mpr_reconstruction(request, series_id):
         volume_data = []
         for img in images:
             try:
-                dicom_path = os.path.join('/workspace/media', str(img.file_path))
+                dicom_path = os.path.join(settings.MEDIA_ROOT, str(img.file_path))
                 ds = pydicom.dcmread(dicom_path)
                 volume_data.append(ds.pixel_array)
             except Exception as e:
@@ -259,7 +266,7 @@ def api_mip_reconstruction(request, series_id):
         volume_data = []
         for img in images:
             try:
-                dicom_path = os.path.join('/workspace/media', str(img.file_path))
+                dicom_path = os.path.join(settings.MEDIA_ROOT, str(img.file_path))
                 ds = pydicom.dcmread(dicom_path)
                 volume_data.append(ds.pixel_array)
             except Exception as e:
@@ -324,7 +331,7 @@ def api_bone_reconstruction(request, series_id):
         volume_data = []
         for img in images:
             try:
-                dicom_path = os.path.join('/workspace/media', str(img.file_path))
+                dicom_path = os.path.join(settings.MEDIA_ROOT, str(img.file_path))
                 ds = pydicom.dcmread(dicom_path)
                 
                 # Convert to Hounsfield Units if possible
@@ -553,6 +560,42 @@ def api_reconstruction(request, study_id):
     
     return JsonResponse({'error': 'Method not allowed'}, status=405)
 
+
+@login_required
+def api_series_slices(request, series_id):
+    """Return lightweight slice metadata for a series to allow prefetching in viewer."""
+    series = get_object_or_404(Series, id=series_id)
+    user = request.user
+    if user.is_facility_user() and series.study.facility != user.facility:
+        return JsonResponse({'error': 'Permission denied'}, status=403)
+    images = series.images.all().order_by('instance_number').values('id', 'instance_number', 'file_path', 'slice_location')
+    return JsonResponse({'series_id': series_id, 'count': images.count(), 'images': list(images)})
+
+
+@login_required
+def api_series_images_chunk(request, series_id):
+    """Paginated images for a series. Query params: offset, limit."""
+    try:
+        offset = int(request.GET.get('offset', '0') or '0')
+        limit = min(int(request.GET.get('limit', '50') or '50'), 200)
+    except Exception:
+        offset, limit = 0, 50
+    series = get_object_or_404(Series, id=series_id)
+    user = request.user
+    if user.is_facility_user() and series.study.facility != user.facility:
+        return JsonResponse({'error': 'Permission denied'}, status=403)
+    qs = series.images.all().order_by('instance_number')
+    total = qs.count()
+    chunk = qs[offset:offset+limit]
+    data = [
+        {
+            'id': img.id,
+            'instance_number': img.instance_number,
+            'file_path': img.file_path.url if img.file_path else ''
+        } for img in chunk
+    ]
+    return JsonResponse({'series_id': series_id, 'total': total, 'offset': offset, 'limit': limit, 'images': data})
+
 @login_required
 @csrf_exempt
 def api_hounsfield_units(request):
@@ -754,18 +797,71 @@ def upload_dicom(request):
             # Generate upload ID for tracking
             upload_id = str(uuid.uuid4())
             
-            # This would process DICOM files and create Study/Series/Image records
-            # For now, we'll simulate processing
             total_files = len(uploaded_files)
             processed_files = 0
-            
+
+            media_base = settings.MEDIA_ROOT
+            save_base = os.path.join(media_base, 'dicom', 'uploads')
+            os.makedirs(save_base, exist_ok=True)
+
             for file in uploaded_files:
-                # Validate file type
                 if not (file.name.lower().endswith('.dcm') or file.name.lower().endswith('.dicom')):
                     continue
-                
-                # This would save the file and create Study/Series/Image records
-                processed_files += 1
+                tmp_path = os.path.join(save_base, f"{uuid.uuid4().hex}_{file.name}")
+                with open(tmp_path, 'wb') as out:
+                    for chunk in file.chunks():
+                        out.write(chunk)
+                try:
+                    ds = pydicom.dcmread(tmp_path, stop_before_pixels=False)
+                    from worklist.models import Patient, Study, Series, DicomImage, Modality
+                    pid = str(getattr(ds, 'PatientID', uuid.uuid4().hex))
+                    pname = str(getattr(ds, 'PatientName', 'Unknown'))
+                    parts = pname.split('^') if pname else ['Unknown','Patient']
+                    first = parts[0] or 'Unknown'; last = (parts[1] if len(parts) > 1 else 'Patient')
+                    try:
+                        dob = str(getattr(ds, 'PatientBirthDate', '19700101'))
+                        dob_fmt = f"{dob[0:4]}-{dob[4:6]}-{dob[6:8]}" if len(dob) == 8 else '1970-01-01'
+                    except Exception:
+                        dob_fmt = '1970-01-01'
+                    gender = (str(getattr(ds, 'PatientSex','O')) or 'O')[0]
+                    patient, _ = Patient.objects.get_or_create(patient_id=pid, defaults={'first_name': first, 'last_name': last, 'date_of_birth': dob_fmt, 'gender': gender})
+                    mod_code = str(getattr(ds, 'Modality', 'CT'))
+                    modality, _ = Modality.objects.get_or_create(code=mod_code, defaults={'name': mod_code})
+                    suid = str(getattr(ds, 'StudyInstanceUID', uuid.uuid4().hex))
+                    acc = str(getattr(ds, 'AccessionNumber', uuid.uuid4().hex[:8]))
+                    from accounts.models import Facility
+                    facility = Facility.objects.first() or Facility.objects.create(name='Default Facility', address='-', phone='-', email='test@example.com', license_number='DEF-001')
+                    study, _ = Study.objects.get_or_create(
+                        study_instance_uid=suid,
+                        defaults={
+                            'accession_number': acc,
+                            'patient': patient,
+                            'facility': facility,
+                            'modality': modality,
+                            'study_description': str(getattr(ds, 'StudyDescription', '')),
+                            'study_date': timezone.now(),
+                            'referring_physician': str(getattr(ds, 'ReferringPhysicianName','')) or 'N/A',
+                        }
+                    )
+                    ser_uid = str(getattr(ds, 'SeriesInstanceUID', uuid.uuid4().hex))
+                    ser_no = int(getattr(ds, 'SeriesNumber', 1) or 1)
+                    series, _ = Series.objects.get_or_create(series_instance_uid=ser_uid, defaults={'study': study, 'series_number': ser_no, 'modality': mod_code, 'series_description': str(getattr(ds, 'SeriesDescription',''))})
+                    rel_path = os.path.relpath(tmp_path, media_base)
+                    sop_uid = str(getattr(ds, 'SOPInstanceUID', uuid.uuid4().hex))
+                    inst_no = int(getattr(ds, 'InstanceNumber', 1) or 1)
+                    size = os.path.getsize(tmp_path)
+                    DicomImage.objects.create(sop_instance_uid=sop_uid, series=series, instance_number=inst_no, file_path=rel_path, file_size=size, processed=False)
+                    try:
+                        pil = _dicom_to_pil(ds)
+                        thumb_dir = os.path.join(media_base, 'dicom', 'thumbnails')
+                        os.makedirs(thumb_dir, exist_ok=True)
+                        thumb_path = os.path.join(thumb_dir, f"{sop_uid}.png")
+                        pil.thumbnail((256, 256)); pil.save(thumb_path, format='PNG')
+                    except Exception:
+                        pass
+                    processed_files += 1
+                except Exception:
+                    continue
             
             if processed_files == 0:
                 return JsonResponse({'success': False, 'error': 'No valid DICOM files found'})
@@ -839,3 +935,195 @@ def api_process_study(request, study_id):
             return JsonResponse({'error': str(e)}, status=500)
     
     return JsonResponse({'error': 'Method not allowed'}, status=405)
+
+
+@login_required
+def get_available_printers(request):
+    """Return available printers (best-effort: CUPS via lpstat fallback)."""
+    printers = []
+    try:
+        out = subprocess.check_output(['lpstat', '-a'], stderr=subprocess.STDOUT, timeout=3).decode()
+        for line in out.splitlines():
+            if line.strip():
+                name = line.split()[0]
+                printers.append({'name': name, 'description': name, 'accepts_jobs': True})
+    except Exception:
+        pass
+    return JsonResponse({'success': True, 'printers': printers})
+
+
+@login_required
+@csrf_exempt
+def print_settings_view(request):
+    """Persist simple print settings in session and render confirmation."""
+    if request.method == 'POST':
+        request.session['print_settings'] = {
+            'default_printer': request.POST.get('default_printer', ''),
+            'paper_size': request.POST.get('paper_size', 'A4'),
+            'print_quality': request.POST.get('print_quality', 'high'),
+            'copies': int(request.POST.get('copies', '1') or '1'),
+        }
+    current = request.session.get('print_settings', {'default_printer': '', 'paper_size': 'A4', 'print_quality': 'high', 'copies': 1})
+    return JsonResponse({'success': True, 'settings': current})
+
+
+def _paper_size(size_name: str):
+    return letter if str(size_name).lower() == 'letter' else A4
+
+
+def _save_png(image: Image.Image, path: str):
+    image.save(path, format='PNG')
+
+
+def _dicom_to_pil(ds):
+    arr = ds.pixel_array
+    if arr.max() > arr.min():
+        norm = ((arr - arr.min()) / (arr.max() - arr.min()) * 255).astype('uint8')
+    else:
+        norm = (arr * 0).astype('uint8')
+    return Image.fromarray(norm, mode='L')
+
+
+@login_required
+@csrf_exempt
+def print_dicom_image(request):
+    """Generate a PDF from a DICOM image and submit to printer using lp (fallback).
+    Expects POST: image_id or study_id/series_id/instance_number, printer_name (optional), paper_size, copies, print_quality.
+    """
+    try:
+        image_id = request.POST.get('image_id')
+        printer_name = request.POST.get('printer_name') or request.session.get('print_settings', {}).get('default_printer', '')
+        paper_size = request.POST.get('paper_size', request.session.get('print_settings', {}).get('paper_size', 'A4'))
+        copies = int(request.POST.get('copies', request.session.get('print_settings', {}).get('copies', 1)))
+
+        img_obj = get_object_or_404(DicomImage, id=image_id)
+        # Facility permissions
+        if request.user.is_facility_user() and img_obj.series.study.facility != request.user.facility:
+            return JsonResponse({'success': False, 'error': 'Permission denied'}, status=403)
+        dicom_path = os.path.join(settings.MEDIA_ROOT, str(img_obj.file_path))
+        ds = pydicom.dcmread(dicom_path)
+        pil_img = _dicom_to_pil(ds)
+
+        exports_dir = os.path.join(settings.MEDIA_ROOT, 'exports')
+        os.makedirs(exports_dir, exist_ok=True)
+        png_path = os.path.join(exports_dir, f'{uuid.uuid4().hex}.png')
+        pdf_name = f'{uuid.uuid4().hex}.pdf'
+        pdf_path = os.path.join(exports_dir, pdf_name)
+        _save_png(pil_img, png_path)
+
+        # Build PDF
+        pagesize = _paper_size(paper_size)
+        c = canvas.Canvas(pdf_path, pagesize=pagesize)
+        width, height = pagesize
+        margin = 36
+        img_reader = ImageReader(png_path)
+        # Fit image preserving aspect ratio
+        iw, ih = pil_img.size
+        scale = min((width - 2*margin) / iw, (height - 2*margin) / ih)
+        dw, dh = iw * scale, ih * scale
+        x = (width - dw) / 2
+        y = (height - dh) / 2
+        c.drawImage(img_reader, x, y, dw, dh, preserveAspectRatio=True, mask='auto')
+        c.showPage(); c.save()
+
+        # Do NOT print on server. Return a browser-printable PDF for the user.
+        download_url = f"{settings.MEDIA_URL.rstrip('/')}/exports/{pdf_name}"
+        return JsonResponse({'success': True, 'download_url': download_url, 'filename': pdf_name})
+    except Exception as e:
+        return JsonResponse({'success': False, 'error': str(e)}, status=500)
+
+
+@login_required
+@csrf_exempt
+def print_image_package(request):
+    """Create a multi-page PDF from multiple images or a whole series.
+    POST accepts either image_ids[] or series_id; returns a downloadable PDF for client-side printing.
+    """
+    try:
+        ids = request.POST.getlist('image_ids[]') or request.POST.getlist('image_ids')
+        series_id = request.POST.get('series_id')
+        images = []
+        if ids:
+            images = list(DicomImage.objects.filter(id__in=ids).select_related('series__study').order_by('instance_number'))
+        elif series_id:
+            series = get_object_or_404(Series, id=series_id)
+            if request.user.is_facility_user() and series.study.facility != request.user.facility:
+                return JsonResponse({'success': False, 'error': 'Permission denied'}, status=403)
+            images = list(series.images.all().order_by('instance_number'))
+        else:
+            return JsonResponse({'success': False, 'error': 'Provide image_ids[] or series_id'}, status=400)
+
+        if not images:
+            return JsonResponse({'success': False, 'error': 'No images found'}, status=404)
+
+        exports_dir = os.path.join(settings.MEDIA_ROOT, 'exports')
+        os.makedirs(exports_dir, exist_ok=True)
+        pdf_name = f'{uuid.uuid4().hex}_package.pdf'
+        pdf_path = os.path.join(exports_dir, pdf_name)
+
+        pagesize = A4
+        c = canvas.Canvas(pdf_path, pagesize=pagesize)
+        width, height = pagesize
+        margin = 36
+        for img in images:
+            dicom_path = os.path.join(settings.MEDIA_ROOT, str(img.file_path))
+            ds = pydicom.dcmread(dicom_path)
+            pil_img = _dicom_to_pil(ds)
+            img_reader = ImageReader(pil_img)
+            iw, ih = pil_img.size
+            scale = min((width - 2*margin) / iw, (height - 2*margin) / ih)
+            dw, dh = iw * scale, ih * scale
+            x = (width - dw) / 2
+            y = (height - dh) / 2
+            c.drawImage(img_reader, x, y, dw, dh, preserveAspectRatio=True, mask='auto')
+            c.showPage()
+        c.save()
+        download_url = f"{settings.MEDIA_URL.rstrip('/')}/exports/{pdf_name}"
+        return JsonResponse({'success': True, 'download_url': download_url, 'filename': pdf_name})
+    except Exception as e:
+        return JsonResponse({'success': False, 'error': str(e)}, status=500)
+
+
+@login_required
+@csrf_exempt
+def export_images_zip(request):
+    """Export selected images or a series as a ZIP of PNGs for editing in Word or other tools.
+    POST accepts image_ids[] or series_id. Returns a downloadable ZIP path.
+    """
+    try:
+        ids = request.POST.getlist('image_ids[]') or request.POST.getlist('image_ids')
+        series_id = request.POST.get('series_id')
+        images = []
+        if ids:
+            images = list(DicomImage.objects.filter(id__in=ids).select_related('series__study').order_by('instance_number'))
+        elif series_id:
+            series = get_object_or_404(Series, id=series_id)
+            if request.user.is_facility_user() and series.study.facility != request.user.facility:
+                return JsonResponse({'success': False, 'error': 'Permission denied'}, status=403)
+            images = list(series.images.all().order_by('instance_number'))
+        else:
+            return JsonResponse({'success': False, 'error': 'Provide image_ids[] or series_id'}, status=400)
+
+        if not images:
+            return JsonResponse({'success': False, 'error': 'No images found'}, status=404)
+
+        exports_dir = os.path.join(settings.MEDIA_ROOT, 'exports')
+        os.makedirs(exports_dir, exist_ok=True)
+        zip_name = f'{uuid.uuid4().hex}_images.zip'
+        zip_path = os.path.join(exports_dir, zip_name)
+        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
+            for img in images:
+                dicom_path = os.path.join(settings.MEDIA_ROOT, str(img.file_path))
+                ds = pydicom.dcmread(dicom_path)
+                pil_img = _dicom_to_pil(ds)
+                buf_path = os.path.join(exports_dir, f'{uuid.uuid4().hex}.png')
+                pil_img.save(buf_path, format='PNG')
+                zf.write(buf_path, arcname=os.path.basename(buf_path))
+                try:
+                    os.remove(buf_path)
+                except Exception:
+                    pass
+        download_url = f"{settings.MEDIA_URL.rstrip('/')}/exports/{zip_name}"
+        return JsonResponse({'success': True, 'download_url': download_url, 'filename': zip_name})
+    except Exception as e:
+        return JsonResponse({'success': False, 'error': str(e)}, status=500)

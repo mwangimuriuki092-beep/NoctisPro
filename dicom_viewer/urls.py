@@ -21,6 +21,8 @@ urlpatterns = [
     # Real-time features
     path('api/realtime/studies/', views.api_realtime_studies, name='api_realtime_studies'),
     path('api/study/<int:study_id>/progress/', views.api_study_progress, name='api_study_progress'),
+    path('api/series/<int:series_id>/slices/', views.api_series_slices, name='api_series_slices'),
+    path('api/series/<int:series_id>/images/', views.api_series_images_chunk, name='api_series_images_chunk'),
     
     # Measurements and annotations
     path('api/study/<int:study_id>/measurements/', views.api_measurements, name='api_measurements'),
@@ -30,4 +32,11 @@ urlpatterns = [
     path('upload/', views.upload_dicom, name='upload_dicom'),
     path('api/upload/progress/<str:upload_id>/', views.api_upload_progress, name='api_upload_progress'),
     path('api/process/study/<int:study_id>/', views.api_process_study, name='api_process_study'),
+
+    # Printing
+    path('print/settings/', views.print_settings_view, name='print_settings'),
+    path('print/printers/', views.get_available_printers, name='get_available_printers'),
+    path('print/image/', views.print_dicom_image, name='print_dicom_image'),
+    path('print/package/', views.print_image_package, name='print_image_package'),
+    path('export/images/', views.export_images_zip, name='export_images_zip'),
 ]

@@ -11,7 +11,6 @@ import json
 import numpy as np
 import pydicom
 import os
-import threading
 import time
 
 from worklist.models import Study, DicomImage, Series
@@ -123,13 +122,11 @@ def analyze_study(request, study_id):
                 )
                 analyses.append(analysis)
             
-            # Start processing in background
+            # Start processing via Celery
             if analyses:
-                threading.Thread(
-                    target=process_ai_analyses,
-                    args=(analyses,),
-                    daemon=True
-                ).start()
+                from .tasks import run_ai_analysis_task
+                for a in analyses:
+                    run_ai_analysis_task.delay(a.id)
             
             return JsonResponse({
                 'success': True,
