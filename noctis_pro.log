@@ -159,3 +159,6 @@ Watching for file changes with StatReloader
 Watching for file changes with StatReloader
 /workspace/dicom_viewer/views.py changed, reloading.
 Watching for file changes with StatReloader
+Forbidden: /reports/export/docx/5/
+/workspace/reports/views.py changed, reloading.
+Watching for file changes with StatReloader

@@ -157,13 +157,26 @@ def export_report_pdf(request, study_id):
 
 @login_required
 def export_report_docx(request, study_id):
-    if not getattr(request.user, 'can_edit_reports', None) or not request.user.can_edit_reports():
+    # Allow radiologists/admins and superusers to export
+    if not (request.user.is_superuser or (getattr(request.user, 'can_edit_reports', None) and request.user.can_edit_reports())):
         return HttpResponse(status=403)
     if Document is None:
         return JsonResponse({'error': 'DOCX export not available (python-docx missing).'}, status=500)
     study = get_object_or_404(Study, id=study_id)
     report = Report.objects.filter(study=study).first()
     doc = Document()
+    # Optional letterhead if facility has one
+    facility = study.facility
+    try:
+        if getattr(facility, 'letterhead', None) and getattr(facility.letterhead, 'url', None):
+            from docx.shared import Inches
+            from django.conf import settings as dj_settings
+            import os as _os
+            lh_path = _os.path.join(dj_settings.MEDIA_ROOT, facility.letterhead.name)
+            if _os.path.exists(lh_path):
+                doc.add_picture(lh_path, width=Inches(6))
+    except Exception:
+        pass
     doc.add_heading('Radiology Report', 0)
     doc.add_paragraph(f"Patient: {study.patient.full_name} ({study.patient.patient_id})")
     doc.add_paragraph(f"Accession: {study.accession_number}    Modality: {study.modality.code}    Date: {study.study_date}")
