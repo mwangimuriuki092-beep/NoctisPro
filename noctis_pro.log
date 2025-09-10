@@ -133,3 +133,7 @@ Watching for file changes with StatReloader
 Watching for file changes with StatReloader
 /workspace/reports/views.py changed, reloading.
 Watching for file changes with StatReloader
+/workspace/dicom_viewer/urls.py changed, reloading.
+Watching for file changes with StatReloader
+/workspace/dicom_viewer/views.py changed, reloading.
+Watching for file changes with StatReloader

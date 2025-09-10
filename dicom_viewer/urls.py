@@ -30,4 +30,9 @@ urlpatterns = [
     path('upload/', views.upload_dicom, name='upload_dicom'),
     path('api/upload/progress/<str:upload_id>/', views.api_upload_progress, name='api_upload_progress'),
     path('api/process/study/<int:study_id>/', views.api_process_study, name='api_process_study'),
+
+    # Printing
+    path('print/settings/', views.print_settings_view, name='print_settings'),
+    path('print/printers/', views.get_available_printers, name='get_available_printers'),
+    path('print/image/', views.print_dicom_image, name='print_dicom_image'),
 ]

@@ -37,6 +37,7 @@ PyMuPDF==1.23.9  # For PDF handling
 python-docx==1.1.0  # For Word documents
 openpyxl==3.1.2  # For Excel files
 qrcode==7.4.2
+reportlab==3.6.12
 
 # Database and caching
 django-redis==5.4.0
