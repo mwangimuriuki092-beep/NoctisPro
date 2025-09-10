@@ -33,7 +33,7 @@ urlpatterns = [
     path('', include('accounts.urls')),
     path('worklist/', include('worklist.urls')),
     path('viewer/', include('dicom_viewer.urls')),
-    # path('reports/', include('reports.urls')),  # Temporarily disabled
+    path('reports/', include('reports.urls')),
     path('admin-panel/', include('admin_panel.urls')),
     path('chat/', include('chat.urls')),  # Re-enabled to fix template URLs
     path('notifications/', include('notifications.urls')),  # Re-enabled to fix template URLs

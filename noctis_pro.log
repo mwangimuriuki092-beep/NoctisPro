@@ -123,3 +123,7 @@ Traceback (most recent call last):
     raise TemplateDoesNotExist(template_name, chain=chain)
 django.template.exceptions.TemplateDoesNotExist: dicom_viewer/viewer.html
 Not Found: /accounts/profile/
+/workspace/noctis_pro/settings.py changed, reloading.
+Watching for file changes with StatReloader
+/workspace/noctis_pro/urls.py changed, reloading.
+Watching for file changes with StatReloader
