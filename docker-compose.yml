@@ -18,6 +18,22 @@ services:
     depends_on:
       - redis
 
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      - DOMAIN=${DOMAIN}
+      - ACME_EMAIL=${ACME_EMAIL}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - web
+
   redis:
     image: redis:7-alpine
     ports:
@@ -43,4 +59,6 @@ volumes:
   media:
   staticfiles:
   redis-data:
+  caddy-data:
+  caddy-config:
 

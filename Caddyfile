@@ -1,0 +1,18 @@
+{
+	# ACME account email for Let's Encrypt
+	email {$ACME_EMAIL}
+}
+
+# Primary domain
+{$DOMAIN} {
+	reverse_proxy web:8000
+}
+
+# Fallback for local testing without a domain
+:80 {
+	@rootHost host localhost 127.0.0.1
+	handle @rootHost {
+		reverse_proxy web:8000
+	}
+	respond "Not Found" 404
+}
