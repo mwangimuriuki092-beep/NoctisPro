@@ -1,0 +1,34 @@
+{% extends 'base.html' %}
+
+{% block title %}DICOM Viewer{% endblock %}
+
+{% block content %}
+<div class="container py-4">
+    <h2 class="mb-3">DICOM Viewer</h2>
+    <p class="text-muted">Select a study to open or use the standalone viewer to load files.</p>
+
+    <div class="mb-3">
+        <a href="{% url 'dicom_viewer:standalone_viewer' %}" class="btn btn-primary">
+            Open Standalone Viewer
+        </a>
+    </div>
+
+    <h5>Recent Studies</h5>
+    {% if recent_studies %}
+    <ul class="list-group">
+        {% for study in recent_studies %}
+        <li class="list-group-item d-flex justify-content-between align-items-center">
+            <div>
+                <div class="fw-bold">{{ study.patient.full_name }} ({{ study.patient.patient_id }})</div>
+                <div class="small text-muted">{{ study.study_description }} • {{ study.study_date|date:"Y-m-d" }}</div>
+            </div>
+            <a href="{% url 'dicom_viewer:view_study' study.id %}" class="btn btn-outline-secondary btn-sm">Open</a>
+        </li>
+        {% endfor %}
+    </ul>
+    {% else %}
+    <div class="alert alert-info">No recent studies available.</div>
+    {% endif %}
+</div>
+{% endblock %}
+

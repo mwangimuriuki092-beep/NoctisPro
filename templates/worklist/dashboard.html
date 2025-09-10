@@ -818,9 +818,12 @@
                 <a href="{% url 'dicom_viewer:standalone_viewer' %}" class="quick-action-btn">
                     <i class="fas fa-folder-open"></i>Standalone Viewer
                 </a>
-                <a href="{% url 'reports:report_list' %}" class="quick-action-btn">
+                {% url 'reports:report_list' as reports_url %}
+                {% if reports_url %}
+                <a href="{{ reports_url }}" class="quick-action-btn">
                     <i class="fas fa-file-medical"></i>Reports
                 </a>
+                {% endif %}
                 <a href="{% url 'chat:chat_rooms' %}" class="quick-action-btn">
                     <i class="fas fa-comments"></i>Chat
                 </a>
