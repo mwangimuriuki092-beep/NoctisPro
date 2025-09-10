@@ -70,6 +70,24 @@ if [[ ! -f .env ]]; then
 fi
 
 echo "==> Writing environment values"
+# Generate SECRET_KEY if missing
+if ! grep -q '^SECRET_KEY=' .env; then
+  echo "Generating SECRET_KEY"
+  SECRET=$(python3 - <<'PY'
+import secrets, string
+alphabet = string.ascii_letters + string.digits + string.punctuation
+alphabet = alphabet.replace('"','').replace("'",'').replace('`','')
+print(''.join(secrets.choice(alphabet) for _ in range(64)))
+PY
+)
+  echo "SECRET_KEY=${SECRET}" >> .env
+fi
+# Set DEBUG appropriately
+if [[ -n "$DOMAIN" ]]; then
+  sed -i "s/^DEBUG=.*/DEBUG=False/" .env || echo "DEBUG=False" >> .env
+else
+  sed -i "s/^DEBUG=.*/DEBUG=True/" .env || echo "DEBUG=True" >> .env
+fi
 if [[ -n "$DOMAIN" ]]; then
   sed -i "s/^DOMAIN=.*/DOMAIN=${DOMAIN}/" .env || echo "DOMAIN=${DOMAIN}" >> .env
   if [[ -n "$ACME_EMAIL" ]]; then
@@ -118,11 +136,36 @@ docker compose -f "$COMPOSE_FILE" up -d
 echo "==> Running database migrations"
 docker compose -f "$COMPOSE_FILE" exec -T web python manage.py migrate --noinput
 
+echo "==> Ensuring superuser (optional)"
+if [[ -n "${ADMIN_USER:-}" && -n "${ADMIN_EMAIL:-}" && -n "${ADMIN_PASSWORD:-}" ]]; then
+  docker compose -f "$COMPOSE_FILE" exec -T web python - << 'PY'
+import os
+os.environ.setdefault('DJANGO_SETTINGS_MODULE','noctis_pro.settings')
+import django
+django.setup()
+from django.contrib.auth import get_user_model
+User = get_user_model()
+u, created = User.objects.get_or_create(username=os.environ['ADMIN_USER'], defaults={'email': os.environ['ADMIN_EMAIL']})
+if created:
+    u.is_superuser = True
+    u.is_staff = True
+    u.set_password(os.environ['ADMIN_PASSWORD'])
+    u.save()
+print('Superuser ready:', u.username)
+PY
+fi
+
 echo "==> Health check"
 sleep 5
 set +e
 echo "Smoke test: /, /login/, /worklist/, /viewer/"
 for path in "/" "/login/" "/worklist/" "/viewer/"; do
+  code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000${path})
+  echo "HTTP ${path} -> ${code}"
+done
+
+echo "Additional smoke tests: reports, APIs"
+for path in "/reports/" "/ai/" "/viewer/api/series/1/slices/" "/viewer/api/series/1/images/?offset=0&limit=1"; do
   code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000${path})
   echo "HTTP ${path} -> ${code}"
 done

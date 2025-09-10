@@ -1,0 +1,24 @@
+{% extends 'base.html' %}
+{% block title %}AI Dashboard{% endblock %}
+{% block content %}
+<div class="container-fluid">
+  <div class="card" style="background: var(--card-bg); border: 1px solid var(--border-color);">
+    <div class="card-body">
+      <h4 class="text-light">AI Analysis Dashboard</h4>
+      <p class="text-muted">Models: {{ total_models }} • Active: {{ active_analyses }} • Completed today: {{ completed_today }}</p>
+      <div class="mt-3">
+        <h6 class="text-light">Recent Analyses</h6>
+        {% if recent_analyses %}
+        <ul>
+          {% for a in recent_analyses %}
+          <li class="text-muted">{{ a.study.accession_number }} - {{ a.ai_model.name }} - {{ a.status }}</li>
+          {% endfor %}
+        </ul>
+        {% else %}
+        <div class="text-muted">No recent analyses.</div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
