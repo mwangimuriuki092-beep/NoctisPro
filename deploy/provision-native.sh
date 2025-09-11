@@ -18,6 +18,22 @@ export DEBIAN_FRONTEND=noninteractive
 
 log "Starting system provisioning for Ubuntu 22.04..."
 
+# Check system requirements for 5GB file handling
+TOTAL_RAM=$(free -m | awk 'NR==2{printf "%.0f", $2/1024}')
+AVAILABLE_DISK=$(df / | awk 'NR==2{printf "%.0f", $4/1024/1024}')
+
+log "System Requirements Check:"
+log "  RAM: ${TOTAL_RAM}GB (Recommended: 8GB+ for 5GB file processing)"
+log "  Disk Space: ${AVAILABLE_DISK}GB available"
+
+if [[ $TOTAL_RAM -lt 4 ]]; then
+    warn "⚠️  Low RAM detected (${TOTAL_RAM}GB). Recommended: 8GB+ for optimal 5GB file processing"
+fi
+
+if [[ $AVAILABLE_DISK -lt 50 ]]; then
+    warn "⚠️  Low disk space (${AVAILABLE_DISK}GB). Recommended: 100GB+ for medical imaging storage"
+fi
+
 log "Updating system packages..."
 apt-get update -y
 apt-get upgrade -y

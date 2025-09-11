@@ -17,11 +17,11 @@ RestartSec=10
 KillMode=mixed
 TimeoutStopSec=30
 
-# Production resource limits
-MemoryMax=2G
-MemoryHigh=1.5G
-CPUQuota=200%
-TasksMax=1000
+# Production resource limits (increased for 5GB file handling)
+MemoryMax=4G
+MemoryHigh=3G
+CPUQuota=300%
+TasksMax=2000
 
 # Security settings
 NoNewPrivileges=true

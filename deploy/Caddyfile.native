@@ -5,9 +5,9 @@
 {$DOMAIN} {
     encode gzip
     
-    # Large file upload support for DICOM files
+    # Large file upload support for DICOM files (5GB limit)
     request_body {
-        max_size 1GB
+        max_size 5GB
     }
 
     header {

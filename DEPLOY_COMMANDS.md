@@ -63,9 +63,9 @@ sudo bash quick-deploy.sh
 - **Security**: Firewall + Fail2ban
 
 ### 📊 File Upload Limits:
-- **Max File Size**: 1GB (perfect for DICOM studies)
-- **Memory Buffer**: 256MB
-- **Processing Timeout**: 5 minutes
+- **Max File Size**: 5GB (handles very large DICOM studies)
+- **Memory Buffer**: 512MB
+- **Processing Timeout**: 10 minutes
 
 ## 🚀 Recommended Deployment Command
 

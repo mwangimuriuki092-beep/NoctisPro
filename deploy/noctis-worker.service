@@ -17,11 +17,11 @@ RestartSec=15
 KillMode=mixed
 TimeoutStopSec=60
 
-# Production resource limits for DICOM processing
-MemoryMax=4G
-MemoryHigh=3G
+# Production resource limits for 5GB DICOM processing
+MemoryMax=8G
+MemoryHigh=6G
 CPUQuota=400%
-TasksMax=2000
+TasksMax=3000
 
 # Security settings
 NoNewPrivileges=true
@@ -32,9 +32,9 @@ PrivateTmp=true
 ProtectKernelTunables=true
 ProtectControlGroups=true
 
-# File limits for large DICOM processing
+# File limits for very large DICOM processing (5GB)
 LimitNOFILE=65536
-LimitMEMLOCK=128M
+LimitMEMLOCK=256M
 
 # Logging
 StandardOutput=journal

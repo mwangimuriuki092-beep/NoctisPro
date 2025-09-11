@@ -4,7 +4,7 @@ Complete production deployment guide for Ubuntu Server 22.04 with HTTPS access a
 
 ## 📋 Prerequisites
 
-- **Fresh Ubuntu Server 22.04** (recommended: 4GB+ RAM, 50GB+ storage)
+- **Fresh Ubuntu Server 22.04** (recommended: 8GB+ RAM, 100GB+ storage for 5GB file handling)
 - **Root access** (sudo privileges)
 - **Internet connection**
 - **PageKite account** (optional, for external HTTPS access without port forwarding)
@@ -79,9 +79,9 @@ sudo bash deploy/deploy-production.sh --skip-provision --pagekite-subdomain mysu
 - **Service Management**: Easy start/stop/restart commands
 
 ### ✅ **Large File Support (DICOM)**
-- **Upload Limit**: 1GB per file
-- **Memory Handling**: 256MB memory buffer
-- **Processing Timeout**: 5 minutes for large studies
+- **Upload Limit**: 5GB per file (handles very large DICOM studies)
+- **Memory Handling**: 512MB memory buffer
+- **Processing Timeout**: 10 minutes for large studies
 - **Storage**: Efficient file storage and serving
 
 ## 🌐 Access Methods

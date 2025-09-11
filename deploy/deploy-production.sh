@@ -355,9 +355,9 @@ echo "   Logs:          /var/log/noctis/"
 echo ""
 
 echo "📊 FILE UPLOAD LIMITS:"
-echo "   Max File Size: 1GB (suitable for DICOM studies)"
-echo "   Memory Limit:  256MB per upload"
-echo "   Timeout:       5 minutes for processing"
+echo "   Max File Size: 5GB (handles very large DICOM studies)"
+echo "   Memory Limit:  512MB per upload"
+echo "   Timeout:       10 minutes for processing"
 echo ""
 
 echo "🛡️ SECURITY FEATURES:"
