@@ -5,6 +5,26 @@
 
 # Primary domain
 {$DOMAIN} {
+	# Security headers
+	headers {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Referrer-Policy same-origin
+		X-XSS-Protection "1; mode=block"
+	}
+
+	# Health check route (served by upstream)
+	route /health* {
+		reverse_proxy web:8000
+	}
+
+	# Static caching for Whitenoise assets
+	@static {
+		path_regexp \.(?:css|js|png|svg|jpg|jpeg|gif|ico|woff|woff2|ttf|map)$
+	}
+	header @static Cache-Control max-age=31536000
+
 	reverse_proxy web:8000
 }
 
