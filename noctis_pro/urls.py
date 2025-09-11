@@ -19,6 +19,7 @@ from django.urls import path, include
 from django.conf import settings
 from django.conf.urls.static import static
 from django.shortcuts import redirect
+from django.http import JsonResponse
 
 def home_redirect(request):
     """Redirect home page to login or dashboard based on authentication"""
@@ -29,6 +30,7 @@ def home_redirect(request):
 
 urlpatterns = [
     path('admin/', admin.site.urls),
+    path('health/', lambda request: JsonResponse({'status': 'ok'}), name='health'),
     path('', home_redirect, name='home'),
     path('', include('accounts.urls')),
     path('worklist/', include('worklist.urls')),

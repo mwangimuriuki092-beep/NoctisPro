@@ -51,3 +51,4 @@ PyJWT==2.8.0
 python-magic==0.4.27
 requests==2.31.0
 urllib3==2.1.0
+dj-database-url==2.1.0
