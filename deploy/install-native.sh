@@ -46,9 +46,23 @@ fi
 # Ensure directories
 mkdir -p media static staticfiles
 
-# Create virtualenv
+# Ensure Python and virtualenv tooling, then create/activate venv
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "python3 is required but not found. Please install Python 3 and rerun." >&2
+  exit 1
+fi
 if [[ ! -d .venv ]]; then
-  python3 -m venv .venv
+  if ! python3 -m venv .venv >/dev/null 2>&1; then
+    echo "Failed to create virtualenv. Attempting to install python3-venv and retry..." >&2
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update -y
+    apt-get install -y python3-venv python3-pip
+    python3 -m venv .venv
+  fi
+fi
+if [[ ! -f .venv/bin/activate ]]; then
+  echo "Virtualenv not found at ${APP_DIR}/.venv. Create it manually: python3 -m venv ${APP_DIR}/.venv" >&2
+  exit 1
 fi
 source .venv/bin/activate
 pip install --upgrade pip setuptools wheel
