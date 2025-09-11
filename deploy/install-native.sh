@@ -44,6 +44,20 @@ if [[ ! -f .env ]]; then
   fi
 fi
 
+# Clean up any existing malformed .env file
+clean_env
+
+# Helper function to clean up malformed .env files
+clean_env() {
+  if [[ -f .env ]]; then
+    # Remove lines that don't follow KEY=VALUE format
+    grep -E '^[A-Z_][A-Z0-9_]*=' .env > .env.tmp || touch .env.tmp
+    mv .env.tmp .env
+    # Ensure file ends with newline
+    [[ -s .env && $(tail -c1 .env | wc -l) -eq 0 ]] && echo "" >> .env
+  fi
+}
+
 # Helper function to set environment variables
 set_env() {
   local key="$1"; shift
@@ -51,6 +65,8 @@ set_env() {
   if grep -q "^${key}=" .env; then
     sed -i "s|^${key}=.*|${key}=${value}|" .env
   else
+    # Ensure the .env file ends with a newline before appending
+    [[ -s .env && $(tail -c1 .env | wc -l) -eq 0 ]] && echo "" >> .env
     echo "${key}=${value}" >> .env
   fi
 }
