@@ -127,30 +127,49 @@ fi
 # Ensure runtime directories exist (only create if missing)
 mkdir -p media static staticfiles || true
 
+PREFERRED_PY_VERSION=${PREFERRED_PY_VERSION:-3.12}
 select_python() {
-  # Prefer Python 3.11 (better compatibility with pinned deps), then 3.10, else system python3
-  local py_candidates=(/usr/bin/python3.11 /usr/bin/python3.10 /usr/bin/python3)
-  for py in "${py_candidates[@]}"; do
-    if [[ -x "$py" ]]; then
-      echo "$py"
-      return 0
+  # Prefer explicit version first, then fallback to generic python3
+  local preferred="/usr/bin/python${PREFERRED_PY_VERSION}"
+  if [[ -x "$preferred" ]]; then
+    echo "$preferred"; return 0
+  fi
+  if [[ -x "/usr/bin/python3" ]]; then
+    echo "/usr/bin/python3"; return 0
+  fi
+  return 1
+}
+
+ensure_preferred_python() {
+  # Try preferred version first, then common fallbacks
+  local versions=("${PREFERRED_PY_VERSION}" 3.12 3.11 3.10)
+  for ver in "${versions[@]}"; do
+    local bin="/usr/bin/python${ver}"
+    if [[ -x "$bin" ]]; then
+      echo "$bin"; return 0
+    fi
+    log "Installing python${ver}..."
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update -y
+    apt-get install -y "python${ver}" "python${ver}-venv" python3-pip || true
+    if [[ -x "$bin" ]]; then
+      echo "$bin"; return 0
     fi
   done
+  # Fallback to system python3
+  if [[ -x "/usr/bin/python3" ]]; then
+    echo "/usr/bin/python3"; return 0
+  fi
   return 1
 }
 
 PYTHON_BIN=""
-if ! PYTHON_BIN=$(select_python); then
-  err "No suitable python3 found. Installing python3.11..."
-  export DEBIAN_FRONTEND=noninteractive
-  apt-get update -y
-  apt-get install -y python3.11 python3.11-venv python3-pip || true
-  if ! PYTHON_BIN=$(select_python); then
-    err "Failed to locate python3 after installation."
-    exit 1
-  fi
+if ! PYTHON_BIN=$(ensure_preferred_python); then
+  err "No suitable Python interpreter found."
+  exit 1
 fi
-log "Using Python interpreter: $PYTHON_BIN ($($PYTHON_BIN -V 2>&1))"
+PY_VER_STR=$($PYTHON_BIN -V 2>&1 || true)
+log "Using Python interpreter: $PYTHON_BIN ($PY_VER_STR)"
 
 # Recreate venv if it's missing or uses a different major.minor than selected
 if [[ -d .venv && -x .venv/bin/python ]]; then
