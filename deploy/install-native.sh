@@ -32,18 +32,6 @@ rsync -a --delete --exclude '.git' --exclude '.venv' --exclude 'node_modules' "$
 
 cd "${APP_DIR}"
 
-# Create env file if missing
-log "Setting up environment configuration..."
-if [[ ! -f .env ]]; then
-  if [[ -f .env.example ]]; then
-    cp .env.example .env
-    log "Created .env from .env.example"
-  else
-    err ".env.example not found, creating minimal .env"
-    touch .env
-  fi
-fi
-
 # Helper function to clean up malformed .env files
 clean_env() {
   if [[ -f .env ]]; then
@@ -67,6 +55,18 @@ set_env() {
     echo "${key}=${value}" >> .env
   fi
 }
+
+# Create env file if missing
+log "Setting up environment configuration..."
+if [[ ! -f .env ]]; then
+  if [[ -f .env.example ]]; then
+    cp .env.example .env
+    log "Created .env from .env.example"
+  else
+    err ".env.example not found, creating minimal .env"
+    touch .env
+  fi
+fi
 
 # Clean up any existing malformed .env file
 clean_env
