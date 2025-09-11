@@ -61,7 +61,7 @@ celery -A noctis_pro worker --loglevel=info
 
 ## Environment Variables
 
-Consider creating a `.env` file for environment-specific settings:
+Consider creating a `.env` file for environment-specific settings (or start from `.env.example`):
 ```
 DEBUG=True
 SECRET_KEY=your-secret-key
@@ -74,3 +74,96 @@ REDIS_URL=redis://localhost:6379
 - The application uses WebSockets for real-time features (chat and notifications)
 - Make sure Redis is running before starting the application
 - For production deployment, consider using gunicorn and nginx
+
+## Native (non-Docker) production deployment on Ubuntu/Debian
+
+1) Provision host (as root):
+```bash
+sudo bash deploy/provision-native.sh
+```
+
+2) Copy/sync repo to server, then install to `/opt/noctis` and set up services:
+```bash
+sudo bash deploy/install-native.sh /path/to/repo /opt/noctis
+```
+
+3) Configure Caddy (TLS and reverse proxy):
+```bash
+# Edit /opt/noctis/.env (set DOMAIN, ACME_EMAIL, ALLOWED_HOSTS, etc.)
+sudo cp /opt/noctis/deploy/Caddyfile.native /etc/caddy/Caddyfile
+sudo systemctl reload caddy
+```
+
+4) Manage services:
+```bash
+sudo systemctl status noctis-web noctis-worker caddy
+sudo journalctl -u noctis-web -f | cat
+```
+
+Notes:
+- Set `DATABASE_URL` to your PostgreSQL instance, or leave it empty to use SQLite.
+- Ensure `REDIS_URL=redis://localhost:6379/0` unless you customize Redis.
+- Static files are collected to `staticfiles/`; Caddy serves `/media/*` directly from `/opt/noctis/media`.
+
+## HTTPS without router changes (PageKite)
+
+If you cannot forward ports 80/443, you can get a stable HTTPS URL using PageKite.
+
+1) Provision & install the app first (see above).
+
+2) Edit `/opt/noctis/.env` and set:
+```
+PAGEKITE_ENABLE=1
+PAGEKITE_SUBDOMAIN=noctispro   # results in https://noctispro.pagekite.me
+PAGEKITE_EMAIL=you@example.com
+PAGEKITE_SECRET=<your-pagekite-secret>
+
+# Django host/security
+ALLOWED_HOSTS=noctispro.pagekite.me,localhost,127.0.0.1
+CSRF_TRUSTED_ORIGINS=https://noctispro.pagekite.me,http://localhost:8000,http://127.0.0.1:8000
+CORS_ALLOWED_ORIGINS=https://noctispro.pagekite.me
+SECURE_SSL_REDIRECT=True
+```
+
+3) Enable the tunnel service:
+```bash
+sudo install -m 0644 /opt/noctis/deploy/noctis-tunnel.service /etc/systemd/system/noctis-tunnel.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now noctis-tunnel
+```
+
+4) Verify and access:
+```bash
+sudo systemctl status noctis-tunnel | cat
+curl -I https://noctispro.pagekite.me/health/
+```
+
+## Ubuntu 22.04 quickstart with PageKite (zero router changes)
+
+1) SSH to your fresh Ubuntu 22.04 server
+```bash
+ssh -p 2222 user@YOUR_SERVER_IP   # adjust port if needed
+```
+
+2) Clone or upload this repo to the server and cd into it
+
+3) Provision and install the app (no Docker)
+```bash
+sudo bash deploy/provision-native.sh
+sudo bash deploy/install-native.sh "$PWD" /opt/noctis
+```
+
+4) Configure a stable HTTPS URL with PageKite
+```bash
+sudo bash deploy/setup-pagekite.sh \
+  --subdomain noctispro \
+  --email you@example.com \
+  --secret <YOUR_PAGEKITE_SECRET> \
+  --app-dir /opt/noctis
+```
+
+5) Check status and open your site
+```bash
+sudo systemctl status noctis-web noctis-tunnel | cat
+curl -I https://noctispro.pagekite.me/health/
+```

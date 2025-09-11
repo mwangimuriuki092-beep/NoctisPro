@@ -1,0 +1,35 @@
+{
+    email {$ACME_EMAIL}
+}
+
+{$DOMAIN} {
+    encode gzip
+
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+        X-Content-Type-Options nosniff
+        X-Frame-Options DENY
+        Referrer-Policy same-origin
+    }
+
+    @static {
+        path_regexp \.(?:css|js|png|svg|jpg|jpeg|gif|ico|woff|woff2|ttf|map)$
+    }
+    header @static Cache-Control max-age=31536000
+
+    handle_path /media/* {
+        root * /opt/noctis
+        file_server
+    }
+
+    reverse_proxy 127.0.0.1:8000
+}
+
+:80 {
+    @rootHost host localhost 127.0.0.1
+    handle @rootHost {
+        reverse_proxy 127.0.0.1:8000
+    }
+    respond "Not Found" 404
+}
+

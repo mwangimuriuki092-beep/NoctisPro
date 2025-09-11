@@ -1,0 +1,19 @@
+[Unit]
+Description=Noctis Celery Worker - Native
+After=network.target redis-server.service postgresql.service
+Wants=redis-server.service postgresql.service
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/noctis
+Environment=DJANGO_SETTINGS_MODULE=noctis_pro.settings
+EnvironmentFile=/opt/noctis/.env
+ExecStart=/opt/noctis/.venv/bin/celery -A noctis_pro worker --loglevel=info
+User=www-data
+Group=www-data
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+

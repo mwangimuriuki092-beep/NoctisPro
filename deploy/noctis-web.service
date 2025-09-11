@@ -1,0 +1,19 @@
+[Unit]
+Description=Noctis Django (Daphne) - Native
+After=network.target postgresql.service redis-server.service
+Wants=postgresql.service redis-server.service
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/noctis
+Environment=DJANGO_SETTINGS_MODULE=noctis_pro.settings
+EnvironmentFile=/opt/noctis/.env
+ExecStart=/opt/noctis/.venv/bin/daphne -b 0.0.0.0 -p 8000 noctis_pro.asgi:application
+User=www-data
+Group=www-data
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+
