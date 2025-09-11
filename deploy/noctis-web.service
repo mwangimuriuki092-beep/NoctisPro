@@ -1,5 +1,5 @@
 [Unit]
-Description=Noctis Django (Daphne) - Native
+Description=Noctis Django (Daphne) - Production
 After=network.target postgresql.service redis-server.service
 Wants=postgresql.service redis-server.service
 
@@ -8,11 +8,38 @@ Type=simple
 WorkingDirectory=/opt/noctis
 Environment=DJANGO_SETTINGS_MODULE=noctis_pro.settings
 EnvironmentFile=/opt/noctis/.env
-ExecStart=/opt/noctis/.venv/bin/daphne -b 0.0.0.0 -p 8000 noctis_pro.asgi:application
+ExecStart=/opt/noctis/.venv/bin/daphne -b 0.0.0.0 -p 8000 --proxy-headers noctis_pro.asgi:application
+ExecReload=/bin/kill -HUP $MAINPID
 User=www-data
 Group=www-data
 Restart=on-failure
-RestartSec=5
+RestartSec=10
+KillMode=mixed
+TimeoutStopSec=30
+
+# Production resource limits
+MemoryMax=2G
+MemoryHigh=1.5G
+CPUQuota=200%
+TasksMax=1000
+
+# Security settings
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/noctis/media /opt/noctis/logs /var/log/noctis
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+
+# File limits for large DICOM uploads
+LimitNOFILE=65536
+LimitMEMLOCK=64M
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=noctis-web
 
 [Install]
 WantedBy=multi-user.target

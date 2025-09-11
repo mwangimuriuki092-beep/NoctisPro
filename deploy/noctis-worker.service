@@ -1,5 +1,5 @@
 [Unit]
-Description=Noctis Celery Worker - Native
+Description=Noctis Celery Worker - Production
 After=network.target redis-server.service postgresql.service
 Wants=redis-server.service postgresql.service
 
@@ -8,11 +8,38 @@ Type=simple
 WorkingDirectory=/opt/noctis
 Environment=DJANGO_SETTINGS_MODULE=noctis_pro.settings
 EnvironmentFile=/opt/noctis/.env
-ExecStart=/opt/noctis/.venv/bin/celery -A noctis_pro worker --loglevel=info
+ExecStart=/opt/noctis/.venv/bin/celery -A noctis_pro worker --loglevel=info --concurrency=4 --max-tasks-per-child=1000
+ExecReload=/bin/kill -HUP $MAINPID
 User=www-data
 Group=www-data
 Restart=on-failure
-RestartSec=5
+RestartSec=15
+KillMode=mixed
+TimeoutStopSec=60
+
+# Production resource limits for DICOM processing
+MemoryMax=4G
+MemoryHigh=3G
+CPUQuota=400%
+TasksMax=2000
+
+# Security settings
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/noctis/media /opt/noctis/logs /var/log/noctis /tmp
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+
+# File limits for large DICOM processing
+LimitNOFILE=65536
+LimitMEMLOCK=128M
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=noctis-worker
 
 [Install]
 WantedBy=multi-user.target

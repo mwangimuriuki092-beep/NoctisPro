@@ -4,12 +4,18 @@
 
 {$DOMAIN} {
     encode gzip
+    
+    # Large file upload support for DICOM files
+    request_body {
+        max_size 1GB
+    }
 
     header {
         Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
         X-Content-Type-Options nosniff
         X-Frame-Options DENY
         Referrer-Policy same-origin
+        X-XSS-Protection "1; mode=block"
     }
 
     @static {
