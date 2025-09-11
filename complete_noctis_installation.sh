@@ -11,7 +11,7 @@ echo "======================================== 🚀"
 echo ""
 
 # Configuration
-REPO_DIR="/home/noctispacs/NoctisPro"
+REPO_DIR="/workspace"
 PAGEKITE_SUBDOMAIN="noctispro"
 PAGEKITE_SECRET="zzkfzcx46xxx49d87xkxf6fc87c28az8"
 PAGEKITE_EMAIL="mwangimuriuki092@gmail.com"
@@ -23,7 +23,7 @@ fi
 
 if [[ ! -d "$REPO_DIR" ]]; then
   echo "❌ Repository directory not found: $REPO_DIR" >&2
-  echo "Please ensure NoctisPro is cloned to ~/NoctisPro" >&2
+  echo "Please ensure NoctisPro is cloned to /workspace" >&2
   exit 1
 fi
 
