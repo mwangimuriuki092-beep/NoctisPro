@@ -19,7 +19,8 @@ apt-get install -y \
   ca-certificates curl gnupg lsb-release apt-transport-https \
   software-properties-common ufw \
   python3 python3-venv python3-pip build-essential libpq-dev \
-  redis-server postgresql postgresql-contrib
+  redis-server postgresql postgresql-contrib \
+  pagekite
 
 systemctl enable --now redis-server
 systemctl enable --now postgresql

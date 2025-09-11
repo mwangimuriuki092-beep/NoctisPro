@@ -1,0 +1,16 @@
+[Unit]
+Description=Noctis PageKite Tunnel
+After=network.target noctis-web.service
+Wants=noctis-web.service
+
+[Service]
+Type=simple
+EnvironmentFile=/opt/noctis/.env
+WorkingDirectory=/opt/noctis
+ExecStart=/usr/bin/pagekite --clean --defaults --service_on=${PAGEKITE_SUBDOMAIN}.pagekite.me:443 https:127.0.0.1:8000 ${PAGEKITE_EMAIL} ${PAGEKITE_SECRET}
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+

@@ -104,3 +104,36 @@ Notes:
 - Set `DATABASE_URL` to your PostgreSQL instance, or leave it empty to use SQLite.
 - Ensure `REDIS_URL=redis://localhost:6379/0` unless you customize Redis.
 - Static files are collected to `staticfiles/`; Caddy serves `/media/*` directly from `/opt/noctis/media`.
+
+## HTTPS without router changes (PageKite)
+
+If you cannot forward ports 80/443, you can get a stable HTTPS URL using PageKite.
+
+1) Provision & install the app first (see above).
+
+2) Edit `/opt/noctis/.env` and set:
+```
+PAGEKITE_ENABLE=1
+PAGEKITE_SUBDOMAIN=noctispro   # results in https://noctispro.pagekite.me
+PAGEKITE_EMAIL=you@example.com
+PAGEKITE_SECRET=<your-pagekite-secret>
+
+# Django host/security
+ALLOWED_HOSTS=noctispro.pagekite.me,localhost,127.0.0.1
+CSRF_TRUSTED_ORIGINS=https://noctispro.pagekite.me,http://localhost:8000,http://127.0.0.1:8000
+CORS_ALLOWED_ORIGINS=https://noctispro.pagekite.me
+SECURE_SSL_REDIRECT=True
+```
+
+3) Enable the tunnel service:
+```bash
+sudo install -m 0644 /opt/noctis/deploy/noctis-tunnel.service /etc/systemd/system/noctis-tunnel.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now noctis-tunnel
+```
+
+4) Verify and access:
+```bash
+sudo systemctl status noctis-tunnel | cat
+curl -I https://noctispro.pagekite.me/health/
+```

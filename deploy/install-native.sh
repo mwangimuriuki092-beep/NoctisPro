@@ -75,6 +75,16 @@ if [[ -f deploy/Caddyfile.native ]]; then
   systemctl reload caddy || systemctl restart caddy || true
 fi
 
+# Enable PageKite tunnel if configured in .env
+if grep -q '^PAGEKITE_ENABLE=1' .env; then
+  if [[ -f deploy/noctis-tunnel.service ]]; then
+    install -m 0644 deploy/noctis-tunnel.service /etc/systemd/system/noctis-tunnel.service
+    systemctl daemon-reload
+    systemctl enable noctis-tunnel.service
+    systemctl restart noctis-tunnel.service
+  fi
+fi
+
 chown -R ${APP_USER}:${APP_USER} "${APP_DIR}" || true
 
 echo "Installation complete. Check services: systemctl status noctis-web noctis-worker caddy"
