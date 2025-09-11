@@ -198,6 +198,7 @@ set_env DATABASE_URL "postgres://noctis_user:${PG_PASSWORD}@localhost:5432/nocti
 # Set production defaults
 set_env DEBUG False
 set_env COLLECTSTATIC 1
+set_env USE_X_FORWARDED_HOST 1
 
 # Ensure directories
 log "Creating application directories..."
