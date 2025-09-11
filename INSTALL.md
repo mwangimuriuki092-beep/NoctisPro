@@ -61,7 +61,7 @@ celery -A noctis_pro worker --loglevel=info
 
 ## Environment Variables
 
-Consider creating a `.env` file for environment-specific settings:
+Consider creating a `.env` file for environment-specific settings (or start from `.env.example`):
 ```
 DEBUG=True
 SECRET_KEY=your-secret-key
@@ -74,3 +74,33 @@ REDIS_URL=redis://localhost:6379
 - The application uses WebSockets for real-time features (chat and notifications)
 - Make sure Redis is running before starting the application
 - For production deployment, consider using gunicorn and nginx
+
+## Native (non-Docker) production deployment on Ubuntu/Debian
+
+1) Provision host (as root):
+```bash
+sudo bash deploy/provision-native.sh
+```
+
+2) Copy/sync repo to server, then install to `/opt/noctis` and set up services:
+```bash
+sudo bash deploy/install-native.sh /path/to/repo /opt/noctis
+```
+
+3) Configure Caddy (TLS and reverse proxy):
+```bash
+# Edit /opt/noctis/.env (set DOMAIN, ACME_EMAIL, ALLOWED_HOSTS, etc.)
+sudo cp /opt/noctis/deploy/Caddyfile.native /etc/caddy/Caddyfile
+sudo systemctl reload caddy
+```
+
+4) Manage services:
+```bash
+sudo systemctl status noctis-web noctis-worker caddy
+sudo journalctl -u noctis-web -f | cat
+```
+
+Notes:
+- Set `DATABASE_URL` to your PostgreSQL instance, or leave it empty to use SQLite.
+- Ensure `REDIS_URL=redis://localhost:6379/0` unless you customize Redis.
+- Static files are collected to `staticfiles/`; Caddy serves `/media/*` directly from `/opt/noctis/media`.
