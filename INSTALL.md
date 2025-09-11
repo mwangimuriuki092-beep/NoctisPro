@@ -137,3 +137,33 @@ sudo systemctl enable --now noctis-tunnel
 sudo systemctl status noctis-tunnel | cat
 curl -I https://noctispro.pagekite.me/health/
 ```
+
+## Ubuntu 22.04 quickstart with PageKite (zero router changes)
+
+1) SSH to your fresh Ubuntu 22.04 server
+```bash
+ssh -p 2222 user@YOUR_SERVER_IP   # adjust port if needed
+```
+
+2) Clone or upload this repo to the server and cd into it
+
+3) Provision and install the app (no Docker)
+```bash
+sudo bash deploy/provision-native.sh
+sudo bash deploy/install-native.sh "$PWD" /opt/noctis
+```
+
+4) Configure a stable HTTPS URL with PageKite
+```bash
+sudo bash deploy/setup-pagekite.sh \
+  --subdomain noctispro \
+  --email you@example.com \
+  --secret <YOUR_PAGEKITE_SECRET> \
+  --app-dir /opt/noctis
+```
+
+5) Check status and open your site
+```bash
+sudo systemctl status noctis-web noctis-tunnel | cat
+curl -I https://noctispro.pagekite.me/health/
+```
