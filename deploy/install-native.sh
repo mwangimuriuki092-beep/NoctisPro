@@ -79,8 +79,13 @@ PY
 )
   set_env POSTGRES_PASSWORD "$PG_PASS"
   
-  # Update PostgreSQL user password
-  sudo -u postgres psql -c "ALTER USER noctis_user PASSWORD '$PG_PASS';" || true
+  # Create/update PostgreSQL user and database
+  sudo -u postgres psql -c "DROP DATABASE IF EXISTS noctis_pro;" || true
+  sudo -u postgres psql -c "DROP USER IF EXISTS noctis_user;" || true
+  sudo -u postgres psql -c "CREATE DATABASE noctis_pro;"
+  sudo -u postgres psql -c "CREATE USER noctis_user WITH PASSWORD '$PG_PASS';"
+  sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE noctis_pro TO noctis_user;"
+  sudo -u postgres psql -c "ALTER USER noctis_user CREATEDB;"
 fi
 
 # Generate admin password if missing
@@ -116,11 +121,12 @@ if ! command -v python3 >/dev/null 2>&1; then
 fi
 
 if [[ ! -d .venv ]]; then
+  log "Creating Python virtual environment..."
   if ! python3 -m venv .venv >/dev/null 2>&1; then
     log "Failed to create virtualenv. Installing python3-venv and retrying..."
     export DEBIAN_FRONTEND=noninteractive
     apt-get update -y
-    apt-get install -y python3-venv python3-pip
+    apt-get install -y python3-venv python3-pip python3-dev build-essential libpq-dev
     python3 -m venv .venv
   fi
 fi
@@ -133,7 +139,14 @@ fi
 source .venv/bin/activate
 log "Installing Python dependencies..."
 pip install --upgrade pip setuptools wheel
-pip install -r requirements.txt
+
+# Install requirements with error handling
+if [[ -f requirements.txt ]]; then
+  pip install -r requirements.txt
+else
+  log "requirements.txt not found, installing basic Django stack..."
+  pip install django daphne psycopg2-binary redis celery pillow
+fi
 
 # Set up Django
 export DJANGO_SETTINGS_MODULE=noctis_pro.settings
@@ -144,10 +157,16 @@ source .env || true
 set +a
 
 log "Running database migrations..."
-python manage.py migrate
+if ! python manage.py migrate; then
+  err "Migration failed. Attempting to reset database..."
+  sudo -u postgres psql -c "DROP DATABASE IF EXISTS noctis_pro;"
+  sudo -u postgres psql -c "CREATE DATABASE noctis_pro;"
+  sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE noctis_pro TO noctis_user;"
+  python manage.py migrate
+fi
 
 log "Collecting static files..."
-python manage.py collectstatic --noinput
+python manage.py collectstatic --noinput || log "Static collection failed, continuing..."
 
 # Create superuser if configured
 if [[ -n "${ADMIN_PASSWORD:-}" ]]; then
