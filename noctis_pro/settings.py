@@ -277,7 +277,18 @@ SESSION_COOKIE_SECURE = get_env_bool('SESSION_COOKIE_SECURE',
                                     DJANGO_WORKSPACE_SETTINGS.get('SESSION_COOKIE_SECURE', not DEBUG))
 CSRF_COOKIE_SECURE = get_env_bool('CSRF_COOKIE_SECURE', 
                                  DJANGO_WORKSPACE_SETTINGS.get('CSRF_COOKIE_SECURE', not DEBUG))
-SECURE_HSTS_SECONDS = int(os.getenv('SECURE_HSTS_SECONDS', '0'))
+# Parse SECURE_HSTS_SECONDS with error handling
+try:
+    hsts_value = os.getenv('SECURE_HSTS_SECONDS', '0').strip()
+    # Handle case where environment variables might be malformed/concatenated
+    if not hsts_value.isdigit():
+        print(f"Warning: SECURE_HSTS_SECONDS value '{hsts_value}' is not a valid integer, using default 0")
+        hsts_value = '0'
+    SECURE_HSTS_SECONDS = int(hsts_value)
+except ValueError as e:
+    print(f"Error parsing SECURE_HSTS_SECONDS: {e}")
+    print(f"Raw value: '{os.getenv('SECURE_HSTS_SECONDS', '0')}'")
+    SECURE_HSTS_SECONDS = 0
 SECURE_HSTS_INCLUDE_SUBDOMAINS = get_env_bool('SECURE_HSTS_INCLUDE_SUBDOMAINS', False)
 SECURE_HSTS_PRELOAD = get_env_bool('SECURE_HSTS_PRELOAD', False)
 SECURE_REFERRER_POLICY = os.getenv('SECURE_REFERRER_POLICY', 'same-origin')
