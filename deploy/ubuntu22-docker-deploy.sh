@@ -6,12 +6,14 @@ set -euo pipefail
 #     [--domain your-domain.com] \
 #     [--email admin@your-domain.com] \
 #     --project-dir /opt/noctis_pro \
-#     [--compose-file docker-compose.yml]
+#     [--compose-file docker-compose.yml] \
+#     [--force-rebuild]
 
 DOMAIN=""
 ACME_EMAIL=""
 PROJECT_DIR="/opt/noctis_pro"
 COMPOSE_FILE="docker-compose.yml"
+FORCE_REBUILD="0"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -23,6 +25,8 @@ while [[ $# -gt 0 ]]; do
       PROJECT_DIR="$2"; shift 2;;
     --compose-file)
       COMPOSE_FILE="$2"; shift 2;;
+    --force-rebuild)
+      FORCE_REBUILD="1"; shift 1;;
     *)
       echo "Unknown arg: $1"; exit 1;;
   esac
@@ -33,7 +37,7 @@ echo "==> ACME email provided: ${ACME_EMAIL:-<none>}"
 
 echo "==> Updating apt and installing prerequisites"
 apt-get update -y
-apt-get install -y ca-certificates curl gnupg ufw
+apt-get install -y ca-certificates curl gnupg ufw git wget
 
 echo "==> Installing Docker Engine"
 install -m 0755 -d /etc/apt/keyrings
@@ -70,6 +74,16 @@ if [[ ! -f .env ]]; then
 fi
 
 echo "==> Writing environment values"
+# Helper to set or replace KEY=VALUE in .env
+set_env() {
+  local key="$1"; shift
+  local value="$1"; shift || true
+  if grep -q "^${key}=" .env; then
+    sed -i "s|^${key}=.*|${key}=${value}|" .env
+  else
+    echo "${key}=${value}" >> .env
+  fi
+}
 # Generate SECRET_KEY if missing
 if ! grep -q '^SECRET_KEY=' .env; then
   echo "Generating SECRET_KEY"
@@ -98,11 +112,29 @@ if [[ -n "$DOMAIN" ]]; then
   sed -i "s/^CORS_ALLOWED_ORIGINS=.*/CORS_ALLOWED_ORIGINS=https:\/\/${DOMAIN},http:\/\/localhost:3000,http:\/\/127.0.0.1:3000/" .env || true
   sed -i "s/^SECURE_SSL_REDIRECT=.*/SECURE_SSL_REDIRECT=True/" .env || echo "SECURE_SSL_REDIRECT=True" >> .env
 else
-  sed -i "s/^DOMAIN=.*/DOMAIN=/" .env || echo "DOMAIN=" >> .env
+  # Use localhost as DOMAIN to keep Caddyfile valid when no public domain is set
+  sed -i "s/^DOMAIN=.*/DOMAIN=localhost/" .env || echo "DOMAIN=localhost" >> .env
   sed -i "s/^ALLOWED_HOSTS=.*/ALLOWED_HOSTS=localhost,127.0.0.1/" .env || echo "ALLOWED_HOSTS=localhost,127.0.0.1" >> .env
   sed -i "s/^CSRF_TRUSTED_ORIGINS=.*/CSRF_TRUSTED_ORIGINS=http:\/\/localhost:8000,http:\/\/127.0.0.1:8000/" .env || true
   sed -i "s/^CORS_ALLOWED_ORIGINS=.*/CORS_ALLOWED_ORIGINS=http:\/\/localhost:3000,http:\/\/127.0.0.1:3000/" .env || true
   sed -i "s/^SECURE_SSL_REDIRECT=.*/SECURE_SSL_REDIRECT=False/" .env || echo "SECURE_SSL_REDIRECT=False" >> .env
+fi
+
+# Ensure Postgres credentials exist
+if ! grep -q '^POSTGRES_DB=' .env; then set_env POSTGRES_DB app; fi
+if ! grep -q '^POSTGRES_USER=' .env; then set_env POSTGRES_USER app; fi
+if ! grep -q '^POSTGRES_PASSWORD=' .env; then
+  echo "Generating POSTGRES_PASSWORD"
+  PGPASS=$(python3 - <<'PY'
+import secrets, string
+alphabet = string.ascii_letters + string.digits
+print(''.join(secrets.choice(alphabet) for _ in range(24)))
+PY
+)
+  set_env POSTGRES_PASSWORD "$PGPASS"
+fi
+if ! grep -q '^DATABASE_URL=' .env; then
+  set_env DATABASE_URL "postgres://$(grep '^POSTGRES_USER=' .env | cut -d= -f2):$(grep '^POSTGRES_PASSWORD=' .env | cut -d= -f2)@db:5432/$(grep '^POSTGRES_DB=' .env | cut -d= -f2)"
 fi
 
 DNS_OK="0"
@@ -128,13 +160,17 @@ sed -i "s/^COLLECTSTATIC=.*/COLLECTSTATIC=1/" .env || echo "COLLECTSTATIC=1" >> 
 
 echo "==> Pulling/building containers"
 docker compose -f "$COMPOSE_FILE" pull || true
-docker compose -f "$COMPOSE_FILE" build --no-cache
+if [[ "$FORCE_REBUILD" == "1" ]]; then
+  docker compose -f "$COMPOSE_FILE" build --no-cache
+else
+  docker compose -f "$COMPOSE_FILE" build --pull
+fi
+
+echo "==> Running Django deploy checks"
+docker compose -f "$COMPOSE_FILE" run --rm web python manage.py check --deploy | cat
 
 echo "==> Starting stack"
 docker compose -f "$COMPOSE_FILE" up -d
-
-echo "==> Running database migrations"
-docker compose -f "$COMPOSE_FILE" exec -T web python manage.py migrate --noinput
 
 echo "==> Ensuring superuser (optional)"
 if [[ -n "${ADMIN_USER:-}" && -n "${ADMIN_EMAIL:-}" && -n "${ADMIN_PASSWORD:-}" ]]; then
@@ -155,26 +191,27 @@ print('Superuser ready:', u.username)
 PY
 fi
 
-echo "==> Health check"
-sleep 5
+echo "==> Waiting for health endpoint"
 set +e
-echo "Smoke test: /, /login/, /worklist/, /viewer/"
-for path in "/" "/login/" "/worklist/" "/viewer/"; do
-  code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000${path})
-  echo "HTTP ${path} -> ${code}"
+for i in {1..30}; do
+  code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/health/)
+  if [[ "$code" == "200" ]]; then
+    echo "Local health OK"
+    break
+  fi
+  sleep 2
 done
-
-echo "Additional smoke tests: reports, APIs"
-for path in "/reports/" "/ai/" "/viewer/api/series/1/slices/" "/viewer/api/series/1/images/?offset=0&limit=1"; do
-  code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000${path})
-  echo "HTTP ${path} -> ${code}"
-done
-
 if [[ "$DNS_OK" == "1" ]]; then
-  code_root=$(curl -sk -o /dev/null -w "%{http_code}" https://${DOMAIN}/)
-  echo "HTTPS / -> ${code_root}"
+  for i in {1..30}; do
+    code=$(curl -sk -o /dev/null -w "%{http_code}" https://${DOMAIN}/health/)
+    if [[ "$code" == "200" ]]; then
+      echo "Public HTTPS health OK"
+      break
+    fi
+    sleep 2
+  done
 else
-  echo "Skipping HTTPS smoke test (DNS not OK or no domain)."
+  echo "Skipping public HTTPS health (DNS not OK or no domain)"
 fi
 set -e
 
