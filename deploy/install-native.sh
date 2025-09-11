@@ -44,9 +44,6 @@ if [[ ! -f .env ]]; then
   fi
 fi
 
-# Clean up any existing malformed .env file
-clean_env
-
 # Helper function to clean up malformed .env files
 clean_env() {
   if [[ -f .env ]]; then
@@ -70,6 +67,9 @@ set_env() {
     echo "${key}=${value}" >> .env
   fi
 }
+
+# Clean up any existing malformed .env file
+clean_env
 
 # Generate SECRET_KEY if missing
 if ! grep -q '^SECRET_KEY=' .env || grep -q 'your-secret-key' .env; then
