@@ -87,16 +87,52 @@ systemctl restart fail2ban
 # Install Caddy from official repo
 if ! command -v caddy >/dev/null 2>&1; then
   log "Installing Caddy web server..."
-  apt-get install -y debian-keyring debian-archive-keyring
-  curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
-  curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' -o /etc/apt/sources.list.d/caddy-stable.list
+  apt-get install -y debian-keyring debian-archive-keyring apt-transport-https
+  curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg 2>/dev/null || true
+  curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' -o /etc/apt/sources.list.d/caddy-stable.list 2>/dev/null || true
   apt-get update -y
-  apt-get install -y caddy
+  if ! apt-get install -y caddy; then
+    log "Failed to install Caddy from repo, installing from GitHub..."
+    curl -L "https://github.com/caddyserver/caddy/releases/latest/download/caddy_linux_amd64.tar.gz" -o /tmp/caddy.tar.gz
+    tar -xzf /tmp/caddy.tar.gz -C /tmp
+    install -m 755 /tmp/caddy /usr/bin/caddy
+    
+    # Create systemd service for manual install
+    cat > /etc/systemd/system/caddy.service << 'EOF'
+[Unit]
+Description=Caddy
+Documentation=https://caddyserver.com/docs/
+After=network.target network-online.target
+Requires=network-online.target
+
+[Service]
+Type=notify
+User=caddy
+Group=caddy
+ExecStart=/usr/bin/caddy run --environ --config /etc/caddy/Caddyfile
+ExecReload=/usr/bin/caddy reload --config /etc/caddy/Caddyfile --force
+TimeoutStopSec=5s
+LimitNOFILE=1048576
+LimitNPROC=1048576
+PrivateTmp=true
+ProtectSystem=full
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    
+    # Create caddy user
+    useradd --system --home /var/lib/caddy --create-home --shell /usr/sbin/nologin caddy || true
+    mkdir -p /etc/caddy
+    chown caddy:caddy /etc/caddy
+  fi
 else
   log "Caddy already installed"
 fi
 
-systemctl enable --now caddy
+systemctl daemon-reload
+systemctl enable --now caddy || log "Caddy service enable failed, will configure later"
 
 # Configure PostgreSQL
 log "Configuring PostgreSQL..."

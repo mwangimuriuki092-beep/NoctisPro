@@ -165,8 +165,11 @@ fi
 if [[ "$SKIP_PROVISION" != "true" ]]; then
     log "📦 Step 1/4: Provisioning system..."
     if [[ -f "$REPO_DIR/deploy/provision-native.sh" ]]; then
-        bash "$REPO_DIR/deploy/provision-native.sh"
-        success "System provisioning completed"
+        if bash "$REPO_DIR/deploy/provision-native.sh"; then
+            success "System provisioning completed"
+        else
+            warn "System provisioning had errors, continuing anyway..."
+        fi
     else
         err "provision-native.sh not found"
         exit 1
@@ -178,8 +181,15 @@ fi
 # Step 2: Application Installation
 log "📱 Step 2/4: Installing application..."
 if [[ -f "$REPO_DIR/deploy/install-native.sh" ]]; then
-    bash "$REPO_DIR/deploy/install-native.sh" "$REPO_DIR" "$APP_DIR"
-    success "Application installation completed"
+    if bash "$REPO_DIR/deploy/install-native.sh" "$REPO_DIR" "$APP_DIR"; then
+        success "Application installation completed"
+    else
+        err "Application installation failed"
+        log "Checking service status..."
+        systemctl status noctis-web --no-pager -l || true
+        journalctl -u noctis-web --no-pager -n 10 || true
+        exit 1
+    fi
 else
     err "install-native.sh not found"
     exit 1
@@ -257,7 +267,14 @@ if [[ -n "$PAGEKITE_SUBDOMAIN" ]]; then
     systemctl restart noctis-tunnel.service || true
 fi
 
-systemctl reload caddy || systemctl restart caddy
+if ! systemctl reload caddy; then
+    log "Caddy reload failed, trying restart..."
+    if ! systemctl restart caddy; then
+        warn "Caddy restart failed, checking status..."
+        systemctl status caddy --no-pager -l || true
+        journalctl -u caddy --no-pager -n 10 || true
+    fi
+fi
 
 # Wait for services to stabilize
 log "Waiting for services to stabilize..."
