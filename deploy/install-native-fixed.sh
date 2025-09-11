@@ -17,6 +17,63 @@ log() { printf "[install] %s\n" "$*"; }
 err() { printf "[install][ERROR] %s\n" "$*" >&2; }
 success() { printf "[install][SUCCESS] %s\n" "$*"; }
 
+# Better error diagnostics
+trap 'err "Failed at line ${LINENO}: ${BASH_COMMAND}"' ERR
+
+# Ensure system dependencies are present (apt-based systems)
+APT_UPDATED=false
+ensure_pkg() {
+  local pkg="$1"
+  if ! dpkg -s "$pkg" >/dev/null 2>&1; then
+    if [[ "$APT_UPDATED" == "false" ]]; then
+      export DEBIAN_FRONTEND=noninteractive
+      apt-get update -y
+      APT_UPDATED=true
+    fi
+    apt-get install -y "$pkg"
+  fi
+}
+
+log "Checking and installing system dependencies if needed..."
+ensure_pkg rsync
+ensure_pkg curl
+ensure_pkg python3
+ensure_pkg python3-venv
+ensure_pkg python3-pip
+ensure_pkg python3-dev
+ensure_pkg build-essential
+ensure_pkg libpq-dev
+ensure_pkg postgresql
+ensure_pkg postgresql-contrib
+ensure_pkg redis-server
+
+# Ensure required services are enabled and running
+systemctl enable --now postgresql >/dev/null 2>&1 || true
+systemctl enable --now redis-server >/dev/null 2>&1 || true
+
+# Ensure PostgreSQL cluster is started, even without systemd
+ensure_postgres_running() {
+  if sudo -u postgres psql -tAc "SELECT 1" >/dev/null 2>&1; then
+    return 0
+  fi
+  if command -v pg_lsclusters >/dev/null 2>&1 && command -v pg_ctlcluster >/dev/null 2>&1; then
+    while read -r ver name _; do
+      pg_ctlcluster "$ver" "$name" start >/dev/null 2>&1 || true
+      pg_ctlcluster --skip-systemctl "$ver" "$name" start >/dev/null 2>&1 || true
+    done < <(pg_lsclusters -h | awk '{print $1" "$2" "$3}')
+  else
+    service postgresql start >/dev/null 2>&1 || systemctl start postgresql >/dev/null 2>&1 || true
+  fi
+  # Wait up to 15s for socket
+  for i in $(seq 1 15); do
+    if sudo -u postgres psql -tAc "SELECT 1" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 1
+  done
+  err "PostgreSQL is not running after attempts to start it. Proceeding may fail."
+}
+
 if [[ -z "${REPO_DIR}" ]]; then
   err "Usage: sudo bash deploy/install-native-fixed.sh /path/to/repo [/opt/noctis]"
   exit 1
@@ -29,7 +86,11 @@ clean_env() {
     grep -E '^[A-Z_][A-Z0-9_]*=' .env > .env.tmp || touch .env.tmp
     mv .env.tmp .env
     # Ensure file ends with newline
-    [[ -s .env && $(tail -c1 .env | wc -l) -eq 0 ]] && echo "" >> .env
+    if [[ -s .env ]]; then
+      if [ "$( (tail -c1 .env 2>/dev/null | wc -l) || true )" -eq 0 ]; then
+        echo "" >> .env
+      fi
+    fi
   fi
 }
 
@@ -41,7 +102,11 @@ set_env() {
     sed -i "s|^${key}=.*|${key}=${value}|" .env
   else
     # Ensure the .env file ends with a newline before appending
-    [[ -s .env && $(tail -c1 .env | wc -l) -eq 0 ]] && echo "" >> .env
+    if [[ -s .env ]]; then
+      if [ "$( (tail -c1 .env 2>/dev/null | wc -l) || true )" -eq 0 ]; then
+        echo "" >> .env
+      fi
+    fi
     echo "${key}=${value}" >> .env
   fi
 }
@@ -103,12 +168,15 @@ print(''.join(secrets.choice(alphabet) for _ in range(24)))
   
   # Create/update PostgreSQL user and database
   log "Setting up PostgreSQL database..."
-  sudo -u postgres psql -c "DROP DATABASE IF EXISTS noctis_pro;" || true
-  sudo -u postgres psql -c "DROP USER IF EXISTS noctis_user;" || true
-  sudo -u postgres psql -c "CREATE DATABASE noctis_pro;"
-  sudo -u postgres psql -c "CREATE USER noctis_user WITH PASSWORD '$PG_PASS';"
-  sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE noctis_pro TO noctis_user;"
-  sudo -u postgres psql -c "ALTER USER noctis_user CREATEDB;"
+  ensure_postgres_running
+  # Terminate connections and recreate database and role without DO blocks
+  sudo -u postgres psql -v ON_ERROR_STOP=1 -d postgres -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='noctis_pro';" || true
+  sudo -u postgres psql -v ON_ERROR_STOP=1 -d postgres -c "DROP DATABASE IF EXISTS noctis_pro;"
+  sudo -u postgres psql -v ON_ERROR_STOP=1 -d postgres -c "DROP ROLE IF EXISTS noctis_user;" || true
+  sudo -u postgres psql -v ON_ERROR_STOP=1 -d postgres -c "CREATE DATABASE noctis_pro;"
+  sudo -u postgres psql -v ON_ERROR_STOP=1 -d postgres -c "CREATE USER noctis_user WITH PASSWORD '${PG_PASS}';"
+  sudo -u postgres psql -v ON_ERROR_STOP=1 -d postgres -c "GRANT ALL PRIVILEGES ON DATABASE noctis_pro TO noctis_user;"
+  sudo -u postgres psql -v ON_ERROR_STOP=1 -d postgres -c "ALTER USER noctis_user CREATEDB;"
 fi
 
 # Generate admin password if missing
@@ -138,16 +206,29 @@ mkdir -p /var/log/noctis
 
 # Set up Python virtual environment
 log "Setting up Python virtual environment..."
-if ! command -v python3 >/dev/null 2>&1; then
-  err "python3 is required but not found. Installing..."
+
+# Prefer Python 3.11 for wide binary wheel support
+PYTHON_BIN="python3.11"
+if ! command -v "$PYTHON_BIN" >/dev/null 2>&1; then
+  log "${PYTHON_BIN} not found. Attempting to install..."
   export DEBIAN_FRONTEND=noninteractive
-  apt-get update -y
-  apt-get install -y python3 python3-venv python3-pip python3-dev build-essential libpq-dev
+  apt-get update -y || true
+  apt-get install -y python3.11 python3.11-venv python3.11-dev || true
+fi
+
+if ! command -v "$PYTHON_BIN" >/dev/null 2>&1; then
+  log "Falling back to system python3"
+  PYTHON_BIN="python3"
+fi
+
+if ! command -v "$PYTHON_BIN" >/dev/null 2>&1; then
+  err "No suitable python interpreter found (looked for python3.11 or python3)"
+  exit 1
 fi
 
 if [[ ! -d .venv ]]; then
-  log "Creating Python virtual environment..."
-  python3 -m venv .venv
+  log "Creating Python virtual environment with ${PYTHON_BIN}..."
+  "$PYTHON_BIN" -m venv .venv
 fi
 
 if [[ ! -f .venv/bin/activate ]]; then
@@ -161,11 +242,17 @@ pip install --upgrade pip setuptools wheel
 
 # Install requirements with error handling
 if [[ -f requirements.txt ]]; then
-  pip install -r requirements.txt
+  if ! pip install -r requirements.txt; then
+    err "requirements install failed; attempting minimal stack install..."
+    pip install django daphne psycopg2-binary redis celery pillow || true
+  fi
 else
   log "requirements.txt not found, installing basic Django stack..."
   pip install django daphne psycopg2-binary redis celery pillow
 fi
+
+# Ensure core Django extras used by the project are present
+pip install dj-database-url python-dotenv whitenoise gunicorn djangorestframework django-cors-headers channels channels-redis || true
 
 # Set up Django
 export DJANGO_SETTINGS_MODULE=noctis_pro.settings
@@ -239,6 +326,10 @@ fi
 
 # Set proper ownership
 log "Setting file permissions..."
+if ! id -u "${APP_USER}" >/dev/null 2>&1; then
+  log "App user ${APP_USER} not found; defaulting ownership to root:root"
+  APP_USER=root
+fi
 chown -R ${APP_USER}:${APP_USER} "${APP_DIR}"
 chmod -R 755 "${APP_DIR}"
 chmod 600 "${APP_DIR}/.env"
