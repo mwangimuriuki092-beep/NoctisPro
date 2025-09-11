@@ -21,6 +21,35 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # Load environment variables from .env file
 load_dotenv(BASE_DIR / '.env')
 
+# Import workspace auto-detection
+try:
+    from .workspace_detector import get_workspace_config, get_django_settings
+    # Get workspace configuration
+    WORKSPACE_CONFIG = get_workspace_config()
+    DJANGO_WORKSPACE_SETTINGS = get_django_settings()
+    
+    # Print detection report if in debug mode or if explicitly requested
+    if os.getenv('SHOW_WORKSPACE_REPORT', '').lower() in ('1', 'true', 'yes'):
+        from .workspace_detector import print_workspace_report
+        print_workspace_report()
+        
+except ImportError as e:
+    # Fallback if workspace detector is not available
+    print(f"Warning: Workspace auto-detection not available: {e}")
+    WORKSPACE_CONFIG = {
+        'workspace_type': 'fallback',
+        'base_path': BASE_DIR,
+        'is_development': True,
+        'debug': True,
+    }
+    DJANGO_WORKSPACE_SETTINGS = {
+        'DEBUG': True,
+        'ALLOWED_HOSTS': ['localhost', '127.0.0.1'],
+        'DATABASE_URL': None,
+        'REDIS_URL': 'redis://localhost:6379/0',
+        'LOG_LEVEL': 'DEBUG',
+    }
+
 
 def get_env_bool(env_var_name: str, default: bool = False) -> bool:
     """Parse a boolean environment variable with sensible defaults."""
@@ -30,17 +59,22 @@ def get_env_bool(env_var_name: str, default: bool = False) -> bool:
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-# Only allow a development default when DEBUG is true
-DEBUG = get_env_bool('DEBUG', False)
+# Use workspace auto-detection to determine DEBUG mode, with env override
+DEBUG = get_env_bool('DEBUG', DJANGO_WORKSPACE_SETTINGS.get('DEBUG', True))
 SECRET_KEY = os.getenv('SECRET_KEY')
 if not SECRET_KEY:
-    if DEBUG:
-        SECRET_KEY = 'dev-insecure-secret-key'
+    if DEBUG or WORKSPACE_CONFIG.get('is_development', True):
+        SECRET_KEY = 'dev-insecure-secret-key-auto-detected'
     else:
         raise ValueError('SECRET_KEY environment variable must be set in production')
 
 # SECURITY WARNING: do not use wildcard hosts in production
-ALLOWED_HOSTS = [h.strip() for h in os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',') if h.strip()]
+# Use workspace auto-detection for allowed hosts, with env override
+env_allowed_hosts = os.getenv('ALLOWED_HOSTS')
+if env_allowed_hosts:
+    ALLOWED_HOSTS = [h.strip() for h in env_allowed_hosts.split(',') if h.strip()]
+else:
+    ALLOWED_HOSTS = DJANGO_WORKSPACE_SETTINGS.get('ALLOWED_HOSTS', ['localhost', '127.0.0.1'])
 
 
 # Application definition
@@ -104,7 +138,8 @@ ASGI_APPLICATION = 'noctis_pro.asgi.application'
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
-DATABASE_URL = os.getenv('DATABASE_URL')
+# Use workspace auto-detection for database configuration
+DATABASE_URL = os.getenv('DATABASE_URL') or DJANGO_WORKSPACE_SETTINGS.get('DATABASE_URL')
 if DATABASE_URL:
     DATABASES = {
         'default': dj_database_url.parse(
@@ -122,8 +157,8 @@ else:
         }
     }
 
-# Redis configuration for channels
-REDIS_URL = os.getenv('REDIS_URL', 'redis://localhost:6379/0')
+# Redis configuration for channels - use workspace auto-detection
+REDIS_URL = os.getenv('REDIS_URL') or DJANGO_WORKSPACE_SETTINGS.get('REDIS_URL', 'redis://localhost:6379/0')
 CHANNEL_LAYERS = {
     'default': {
         'BACKEND': 'channels_redis.core.RedisChannelLayer',
@@ -175,15 +210,16 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
 
 STATIC_URL = '/static/'
-STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
+# Use workspace auto-detection for static root
+STATIC_ROOT = os.getenv('STATIC_ROOT') or DJANGO_WORKSPACE_SETTINGS.get('STATIC_ROOT', os.path.join(BASE_DIR, 'staticfiles'))
 STATICFILES_DIRS = [
     os.path.join(BASE_DIR, 'static'),
 ]
 STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
 
-# Media files (uploads)
+# Media files (uploads) - use workspace auto-detection
 MEDIA_URL = '/media/'
-MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
+MEDIA_ROOT = os.getenv('MEDIA_ROOT') or DJANGO_WORKSPACE_SETTINGS.get('MEDIA_ROOT', os.path.join(BASE_DIR, 'media'))
 
 # DICOM files storage
 DICOM_ROOT = os.path.join(MEDIA_ROOT, 'dicom')
@@ -231,13 +267,16 @@ SECURE_BROWSER_XSS_FILTER = True
 SECURE_CONTENT_TYPE_NOSNIFF = True
 X_FRAME_OPTIONS = 'DENY'
 
-# SSL/Proxy settings for HTTPS behind Caddy
+# SSL/Proxy settings for HTTPS behind Caddy - use workspace auto-detection
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
-SECURE_SSL_REDIRECT = get_env_bool('SECURE_SSL_REDIRECT', not DEBUG)
+SECURE_SSL_REDIRECT = get_env_bool('SECURE_SSL_REDIRECT', 
+                                  DJANGO_WORKSPACE_SETTINGS.get('SECURE_SSL_REDIRECT', not DEBUG))
 
-# Cookies and transport security
-SESSION_COOKIE_SECURE = get_env_bool('SESSION_COOKIE_SECURE', not DEBUG)
-CSRF_COOKIE_SECURE = get_env_bool('CSRF_COOKIE_SECURE', not DEBUG)
+# Cookies and transport security - use workspace auto-detection
+SESSION_COOKIE_SECURE = get_env_bool('SESSION_COOKIE_SECURE', 
+                                    DJANGO_WORKSPACE_SETTINGS.get('SESSION_COOKIE_SECURE', not DEBUG))
+CSRF_COOKIE_SECURE = get_env_bool('CSRF_COOKIE_SECURE', 
+                                 DJANGO_WORKSPACE_SETTINGS.get('CSRF_COOKIE_SECURE', not DEBUG))
 SECURE_HSTS_SECONDS = int(os.getenv('SECURE_HSTS_SECONDS', '0'))
 SECURE_HSTS_INCLUDE_SUBDOMAINS = get_env_bool('SECURE_HSTS_INCLUDE_SUBDOMAINS', False)
 SECURE_HSTS_PRELOAD = get_env_bool('SECURE_HSTS_PRELOAD', False)
@@ -261,7 +300,7 @@ LOGGING = {
     },
     'root': {
         'handlers': ['console'],
-        'level': 'INFO',
+        'level': os.getenv('LOG_LEVEL') or DJANGO_WORKSPACE_SETTINGS.get('LOG_LEVEL', 'INFO'),
     },
     'loggers': {
         'django': {
