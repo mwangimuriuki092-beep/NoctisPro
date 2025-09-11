@@ -102,6 +102,7 @@ Type=simple
 EnvironmentFile=${APP_DIR}/.env
 WorkingDirectory=${APP_DIR}
 ExecStart=/usr/bin/pagekite --clean --defaults --service_on=${SUBDOMAIN}.pagekite.me:443 https:127.0.0.1:8000 ${EMAIL} ${SECRET}
+Environment=DJANGO_SETTINGS_MODULE=noctis_pro.settings
 Restart=on-failure
 RestartSec=5
 StandardOutput=journal

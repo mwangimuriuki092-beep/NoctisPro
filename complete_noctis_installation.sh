@@ -39,11 +39,16 @@ echo "   PageKite Email: $PAGEKITE_EMAIL"
 echo "   External URL: https://${PAGEKITE_SUBDOMAIN}.pagekite.me"
 echo ""
 
-read -p "🤔 Continue with installation? (y/N): " -n 1 -r
-echo
-if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-    echo "Installation cancelled."
-    exit 0
+# Allow non-interactive runs via NON_INTERACTIVE=1
+if [[ "${NON_INTERACTIVE:-0}" != "1" ]]; then
+  read -p "🤔 Continue with installation? (y/N): " -n 1 -r
+  echo
+  if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+      echo "Installation cancelled."
+      exit 0
+  fi
+else
+  echo "Running in non-interactive mode (NON_INTERACTIVE=1)."
 fi
 
 echo ""
